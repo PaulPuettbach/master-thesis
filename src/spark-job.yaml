@@ -1,0 +1,33 @@
+replicas: 1
+selector:
+  matchLables:
+    job: spark-job
+  template:
+    metadata:
+      labels:
+        job: spark-job
+    spec:
+      containers:
+      - args:
+        - '/opt/spark/bin/spark-submit ../examples/src/main/python/pi.py 1000000; tail -f /dev/null;'
+        command:
+        - /bin/sh
+        - =c
+        image: name of the image
+        imagePullPolicy: Always
+        name: main
+        resources:
+          request:
+            cpu: "1.5"
+            memory: 2Gi
+        volumeMounts:
+        - mountPath: /opt/spark/conf
+          name: spark-config
+      imagePullPolicy:
+      - name: regcred
+      ServiceAccount: spark
+      ServiceAccountName: spark
+      volume:
+      - configMap:
+          name: spark-config
+        name: spark-config
