@@ -45,7 +45,7 @@ def scheduler(name, node, namespace="default"):
     body.target=target
     body.metadata=meta
     
-    return v1.create_namespaced_binding_binding(name, namespace, body)
+    return v1.create_namespaced_binding(name, namespace, body)
 
 def main():
     w = watch.Watch()

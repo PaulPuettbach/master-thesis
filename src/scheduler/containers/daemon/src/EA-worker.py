@@ -29,7 +29,6 @@ def node_status():
 def node_status():
     print("update from main scheduler to the pool")
 
-#get the best version from other daemons
 
 """Logic"""
 
