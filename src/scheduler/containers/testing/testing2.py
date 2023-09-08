@@ -157,112 +157,93 @@ def partially_mapped_crossover(parent1, parent2, k=1):
     if not len(parent1.gene_array) == len(parent2.gene_array):
         raise Exception("k_point_crossover called with two parents of different length")
     
-    child = Genotype([Gene("placeholder",[])] * len(parent1.gene_array))
+    child = Genotype([])
+    for index in range(len(parent1.gene_array)):
+        child.gene_array.append(Gene("placeholder",[]))
     
     leftover_tasks = []
     # one more than number of tasks in total because id start at one and constant arithmatic is more wasterful then simply having one more unused bit
     bm = BitMap(9)
     gene_idx = 0
-    for gene in child.gene_array:
-        print(f"this is how many time gene loop is called {gene_idx}")
+    while gene_idx < len(child.gene_array):
+        temp = k
         while True:  
-            n_tasks_per_chunk = math.floor(len(parent1.gene_array[gene_idx].tasksqueue) / (k+1))
+            n_tasks_per_chunk = math.floor(len(parent1.gene_array[gene_idx].tasksqueue) / (temp+1))
             if n_tasks_per_chunk == 0:
-                k = k-1
+                temp = temp-1
             else:
                 break
-        if k == 0: #this ensure n tasks per chucnk is one
-            gene.tasksqueue = parent1.gene_array[gene_idx].tasksqueue
-            continue
-        print(f"this is the n task per chunck for three should be one{n_tasks_per_chunk}")
 
-        print(f"this is the gene_idx {gene_idx}")
-        print(f"this is what is put as the resource {parent1.gene_array[gene_idx].resource}")
-        gene.resource = parent1.gene_array[gene_idx].resource
+        child.gene_array[gene_idx].resource = parent1.gene_array[gene_idx].resource
 
         #the taskqueue size is taken from one parent
-        gene.tasksqueue = [0] * len(parent1.gene_array[gene_idx].tasksqueue)
-        print(f"this is the gene taskqueue at this point {gene.tasksqueue}")
+        for i in range(len(parent1.gene_array[gene_idx].tasksqueue)):
+            child.gene_array[gene_idx].tasksqueue.append(0)
+
         child_task_idx = 0
         chosen_idx = 0
         other_idx = 0
         coin = randint(0,1)
         if coin:
-            print("chosen parent is 1")
             chosen_parent_tasks = parent1.gene_array[gene_idx].tasksqueue
             other_parent_tasks = parent2.gene_array[gene_idx].tasksqueue
         else:
-            print("chosen parent is 2")
             chosen_parent_tasks = parent2.gene_array[gene_idx].tasksqueue
             other_parent_tasks = parent1.gene_array[gene_idx].tasksqueue
-        while child_task_idx <  len(gene.tasksqueue):
-            print(f"this is how many time task loop is called {child_task_idx}")
+
+
+        while child_task_idx <  len(child.gene_array[gene_idx].tasksqueue):
 
             task_taken = False
             
             if child_task_idx < n_tasks_per_chunk:
                 while not task_taken and chosen_idx < len(chosen_parent_tasks):
                     if not bm.test(chosen_parent_tasks[chosen_idx].id):
-                        print("==============this is chosen parent and found ================")
-                        print(f"full queue before assignment {gene.tasksqueue}")
-                        print(f"this is the task before {gene.tasksqueue[child_task_idx]}")
-                        print(f"what is being assigned {chosen_parent_tasks[chosen_idx]}")
-                        gene.tasksqueue[child_task_idx] = chosen_parent_tasks[chosen_idx]
-                        print(f"full queue afer assignment {gene.tasksqueue}")
+                        child.gene_array[gene_idx].tasksqueue[child_task_idx] = chosen_parent_tasks[chosen_idx]
                         bm.set(chosen_parent_tasks[chosen_idx].id)
                         task_taken = True
-                    chosen_idx = chosen_idx +1
-                    break
+                        chosen_idx = chosen_idx +1
+                    else:
+                        chosen_idx = chosen_idx +1
+                        continue
 
                 while not task_taken and other_idx < len(other_parent_tasks):
                     if not bm.test(other_parent_tasks[other_idx].id):
-                        print("==============this is chosen parent and other ================")
-                        print(f"full queue before assignment {gene.tasksqueue}")
-                        print(f"this is the task before {gene.tasksqueue[child_task_idx]}")
-                        print(f"what is being assigned {other_parent_tasks[chosen_idx]}")
-                        gene.tasksqueue[child_task_idx] = other_parent_tasks[other_idx]
-                        print(f"full queue afer assignment {gene.tasksqueue}")
+                        child.gene_array[gene_idx].tasksqueue[child_task_idx] = other_parent_tasks[other_idx]
                         bm.set(other_parent_tasks[other_idx].id)
                         task_taken = True
-                    other_idx = other_idx +1
-                    break
+                        other_idx = other_idx +1
+                    else:
+                        other_idx = other_idx +1
+                        continue
             else:
                 while not task_taken and other_idx < len(other_parent_tasks):
                     if not bm.test(other_parent_tasks[other_idx].id):
-                        print("==============this is chosen parent and found ================")
-                        print(f"full queue before assignment {gene.tasksqueue}")
-                        print(f"this is the task before {gene.tasksqueue[child_task_idx]}")
-                        print(f"what is being assigned {other_parent_tasks[chosen_idx]}")
-                        gene.tasksqueue[child_task_idx] = other_parent_tasks[other_idx]
-                        print(f"full queue afer assignment {gene.tasksqueue}")
+                        child.gene_array[gene_idx].tasksqueue[child_task_idx] = other_parent_tasks[other_idx]
                         bm.set(other_parent_tasks[other_idx].id)
                         task_taken = True
-                    other_idx = other_idx +1
-                    break
+                        other_idx = other_idx +1
+                    else:
+                        other_idx = other_idx +1
+                        continue
                 
                 while not task_taken and chosen_idx < len(chosen_parent_tasks):
                     if not bm.test(chosen_parent_tasks[chosen_idx].id):
-                        print("==============this is other parent and chosen ================")
-                        print(f"full queue before assignment {gene.tasksqueue}")
-                        print(f"this is the task before {gene.tasksqueue[child_task_idx]}")
-                        print(f"what is being assigned {chosen_parent_tasks[chosen_idx]}")
-                        gene.tasksqueue[child_task_idx] = chosen_parent_tasks[chosen_idx]
-                        print(f"full queue afer assignment {gene.tasksqueue}")
+                        child.gene_array[gene_idx].tasksqueue[child_task_idx] = chosen_parent_tasks[chosen_idx]
                         bm.set(chosen_parent_tasks[chosen_idx].id)
                         task_taken = True
-                    chosen_idx = chosen_idx +1
-                    break
-                
-            for task_idx in range(len(leftover_tasks)-1):
-                print("using leftover tasks")
-                if task_taken:
-                    break
-                if not bm.test(leftover_tasks[task_idx].id):
-                    task = leftover_tasks[task_idx]
-                    leftover_tasks.pop(task_idx)
-                    task_taken = True
-                    break
-            print("increase the child index")
+                        chosen_idx = chosen_idx +1
+                    else:
+                        chosen_idx = chosen_idx +1
+                        continue
+            if not task_taken:
+                for task_idx in range(len(leftover_tasks)-1):
+                    if not bm.test(leftover_tasks[task_idx].id):
+                        child.gene_array[gene_idx].tasksqueue[child_task_idx] = leftover_tasks[task_idx]
+                        leftover_tasks.pop(task_idx)
+                        bm.set(leftover_tasks[task_idx].id)
+                        task_taken = True
+                        break
             child_task_idx = child_task_idx +1
         #after this point there is guranttedd to be a task in the child queue and any leftover go to leftovers
         while chosen_idx < len(chosen_parent_tasks):

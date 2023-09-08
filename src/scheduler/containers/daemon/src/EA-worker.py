@@ -169,110 +169,106 @@ def partially_mapped_crossover(parent1, parent2, k=1):
     if not len(parent1.gene_array) == len(parent2.gene_array):
         raise Exception("k_point_crossover called with two parents of different length")
     
-    child = Genotype([Gene("placeholder",[])] * len(parent1.gene_array))
+    child = Genotype([])
+    for index in range(len(parent1.gene_array)):
+        child.gene_array.append(Gene("placeholder",[]))
     
     leftover_tasks = []
+    # one more than number of tasks in total because id start at one and constant arithmatic is more wasterful then simply having one more unused bit
+    bm = BitMap(9)
     gene_idx = 0
-    for gene in child.gene_array:
+    while gene_idx < len(child.gene_array):
+        temp = k
         while True:  
-            n_tasks_per_chunk = math.floor(len(parent1.gene_array[gene_idx].tasksqueue) / (k+1))
+            n_tasks_per_chunk = math.floor(len(parent1.gene_array[gene_idx].tasksqueue) / (temp+1))
             if n_tasks_per_chunk == 0:
-                k = k-1
+                temp = temp-1
             else:
                 break
-        if k == 0: #this ensure n tasks per chucnk is one
-            gene.tasksqueue = parent1.gene_array[gene_idx].tasksqueue
-            continue
 
-
-        gene.resource = parent1.gene_array[gene_idx].resource
+        child.gene_array[gene_idx].resource = parent1.gene_array[gene_idx].resource
 
         #the taskqueue size is taken from one parent
-        gene.tasksqueue = [0] * len(parent1.gene_array[gene_idx].tasksqueue)
+        for i in range(len(parent1.gene_array[gene_idx].tasksqueue)):
+            child.gene_array[gene_idx].tasksqueue.append(0)
+
+        child_task_idx = 0
+        chosen_idx = 0
+        other_idx = 0
+        coin = randint(0,1)
+        if coin:
+            chosen_parent_tasks = parent1.gene_array[gene_idx].tasksqueue
+            other_parent_tasks = parent2.gene_array[gene_idx].tasksqueue
+        else:
+            chosen_parent_tasks = parent2.gene_array[gene_idx].tasksqueue
+            other_parent_tasks = parent1.gene_array[gene_idx].tasksqueue
 
 
-        """for each chuck iterate over teh n tasks per chunck and flip a coin what parent to take from where you go over the tasks till there is one you can use
-        """
+        while child_task_idx <  len(child.gene_array[gene_idx].tasksqueue):
 
-        """two loops inside one for each parents taskqueue i make the iteration modulo the taskqueue length so we start in the front again if we have to we take number of chunks per task from each parent the 
-        other one we mark as leftover if we cant take more from one queue we try the other if we cant take from either we take from leftover
-        """
-        """
-
-psudocode:
-used bitmap = bitmap
-gene in child
-    taskqueue = parent1 taskqueue
-    child_task_idx
-    
-    for task in child:
-        if task_ix < lowerbound and task idx > upper bound
-        #take from parent 1 if you can if you cant take from parent two or leftover
-            while parent1_task_idx < parent 1 taskquque length
-                
-                if and  bitmap <<<<<<< taskid == 0
-                    take parent 1
-                    step parent 1 idx
-                    update bitmap to taken
+            task_taken = False
             
-            while parent2_task_idx < parent 2 taskqueue length
-                if bitmap taskid + 0
-                    take parent 2
-                    step idx parent 2
-                    update bitmap
-            for task in leftover
-                if bitmap == 0
-                    take
-                    break
-            should not get here
-        else
-            while parent2_task_idx < parent 1 taskquque length
+            if child_task_idx < n_tasks_per_chunk:
+                while not task_taken and chosen_idx < len(chosen_parent_tasks):
+                    if not bm.test(chosen_parent_tasks[chosen_idx].id):
+                        child.gene_array[gene_idx].tasksqueue[child_task_idx] = chosen_parent_tasks[chosen_idx]
+                        bm.set(chosen_parent_tasks[chosen_idx].id)
+                        task_taken = True
+                        chosen_idx = chosen_idx +1
+                    else:
+                        chosen_idx = chosen_idx +1
+                        continue
+
+                while not task_taken and other_idx < len(other_parent_tasks):
+                    if not bm.test(other_parent_tasks[other_idx].id):
+                        child.gene_array[gene_idx].tasksqueue[child_task_idx] = other_parent_tasks[other_idx]
+                        bm.set(other_parent_tasks[other_idx].id)
+                        task_taken = True
+                        other_idx = other_idx +1
+                    else:
+                        other_idx = other_idx +1
+                        continue
+            else:
+                while not task_taken and other_idx < len(other_parent_tasks):
+                    if not bm.test(other_parent_tasks[other_idx].id):
+                        child.gene_array[gene_idx].tasksqueue[child_task_idx] = other_parent_tasks[other_idx]
+                        bm.set(other_parent_tasks[other_idx].id)
+                        task_taken = True
+                        other_idx = other_idx +1
+                    else:
+                        other_idx = other_idx +1
+                        continue
                 
-                if and  bitmap <<<<<<< taskid == 0
-                    take parent 1
-                    step parent 1 idx
-                    update bitmap to taken
-            
-            while parent1_task_idx < parent 2 taskqueue length
-                if bitmap taskid + 0
-                    take parent 2
-                    step idx parent 2
-                    update bitmap
-            for task in leftover
-                if bitmap == 0
-                    take
-                    break
-            should not get here
-    step through rest of parent1 and two and update leftover
-        while parent1_task_idx < parent 1 taskquque length
-            if bitmap == 0
-                contiue
-            else
-                leftover.append(task)
-
-        while parent2_task_idx < parent 1 taskquque length
-            if bitmap == 0
-                contiue
-            else
-                leftover.append(task)
-"""
-
-        # for i in range(k +1):
-        #     #on even take parent 1
-        #     if i % 2 == 0:
-        #         #the last bit
-        #         if i == k:
-        #             gene.tasksqueue[(i * n_tasks_per_chunk):] = parent1.gene_array[gene_idx].taskqueue[(i * n_tasks_per_chunk):]
-        #         else:
-        #             child.append(parent1.array[(i * n_genes_per_chunk):((i+1) * (n_genes_per_chunk))])
-        #     #on odd take parent 2
-        #     if i % 2 == 1:
-        #                     #the last bit
-        #         if i == k:
-        #             child.append(parent2.array[(i * n_genes_per_chunk):])
-        #         else:
-        #             child.append(parent2.array[(i * n_genes_per_chunk):((i+1) * (n_genes_per_chunk))])
-        # gene_idx = gene_idx +1
+                while not task_taken and chosen_idx < len(chosen_parent_tasks):
+                    if not bm.test(chosen_parent_tasks[chosen_idx].id):
+                        child.gene_array[gene_idx].tasksqueue[child_task_idx] = chosen_parent_tasks[chosen_idx]
+                        bm.set(chosen_parent_tasks[chosen_idx].id)
+                        task_taken = True
+                        chosen_idx = chosen_idx +1
+                    else:
+                        chosen_idx = chosen_idx +1
+                        continue
+            if not task_taken:
+                for task_idx in range(len(leftover_tasks)-1):
+                    if not bm.test(leftover_tasks[task_idx].id):
+                        child.gene_array[gene_idx].tasksqueue[child_task_idx] = leftover_tasks[task_idx]
+                        leftover_tasks.pop(task_idx)
+                        bm.set(leftover_tasks[task_idx].id)
+                        task_taken = True
+                        break
+            child_task_idx = child_task_idx +1
+        #after this point there is guranttedd to be a task in the child queue and any leftover go to leftovers
+        while chosen_idx < len(chosen_parent_tasks):
+            if not bm.test(chosen_parent_tasks[chosen_idx].id):
+                leftover_tasks.append(chosen_parent_tasks[chosen_idx])
+            chosen_idx = chosen_idx +1
+        
+        while other_idx < len(other_parent_tasks):
+            if not bm.test(other_parent_tasks[other_idx].id):
+                leftover_tasks.append(other_parent_tasks[other_idx])
+            other_idx = other_idx +1
+        gene_idx = gene_idx +1
+        
     return child
 
 
