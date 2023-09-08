@@ -4,7 +4,7 @@ import json
 import requests
 from flask import Flask, request
 
-config.load_kube_config()
+config.load_incluster_config()
 
 # this is basically how this works:
 # look at all the nodes
