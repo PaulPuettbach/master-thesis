@@ -24,13 +24,13 @@ choose from the first group, and the other 20% from the second.
 
 init: random
 
+fitnesscalc: fitnessfunctions
+
 parent selection: k tournament selection  change k to change selection pressure
 
 crossover: k point two parent crossover
 
 mutation : three adaptive mutation coefficents one for small step 
-
-fitnesscalc: fitnessfunctions
 
 replacement: elitism 
 
@@ -53,24 +53,35 @@ def workqueue():
 
 
 """Logic"""
+class tenant:
+    def __init__(self,id):
+        self.id = id
+    
+    def __str__(self):
+        return f'tenant({self.id})'
+    
+    def __repr__(self): 
+        return f'tenant({self.id})'
+    
 class Task:
-    def __init__(self,id, status, migration = False, migrate_to = ""):
+    def __init__(self,id, status, tenant, migration = False, migrate_to = ""):
         self.id = id
         self.status = status
+        self.tenant = tenant
         self.migration = migration
         self.migrate_to = migrate_to
     
     def __str__(self):
         if not self.migration:
-            return f'task({self.id}, status: {self.status})'
+            return f'task({self.id}, status: {self.status}, ({self.tenant}))'
         else:
-            return f'migration_task({self.id}, status: {self.status}, migrate_to : {self.migrate_to})'
+            return f'migration_task({self.id}, status: {self.status}, ({self.tenant}), migrate_to : {self.migrate_to})'
     
     def __repr__(self): 
         if not self.migration:
-            return f'task({self.id}, status: {self.status})'
+            return f'task({self.id}, status: {self.status}, ({self.tenant}))'
         else:
-            return f'migration_task({self.id}, status: {self.status}, migrate_to : {self.migrate_to})'
+            return f'migration_task({self.id}, status: {self.status}, ({self.tenant}), migrate_to : {self.migrate_to})'
     
 class Gene:
     def __init__(self,resource, tasksqueue):
@@ -84,11 +95,12 @@ class Gene:
         return f'genome({self.tasksqueue} on {self.resource})' 
 
 class Genotype:
-    def __init__(self, gene_array):
+    def __init__(self, gene_array, fitnessvalue):
         self.gene_array = gene_array
+        self.fitnessvalue = fitnessvalue
 
     def __str__(self):
-        return f'genotype({self.gene_array})'
+        return f'genotype(fitness{self.fitnessvalue}, {self.gene_array})'
     
 class Population:
     def __init__(self, population):
@@ -103,8 +115,96 @@ class current_resources:
 
     def __str__(self):
         return f'current_resources(size: {len(self.resource_array)}, list of nodes: {self.resource_array})'
+
+"""
+gloabl variables
+"""
+fairness_coef = 0.3
+local_coef = 0.7
+
+
+"""
+all the fitness functions
+input:  
+    - to_eval ([Genotype]): set of Genotypes to eval for fitness
+output: 
+    - NA the input will be updated with new fitness values
+description:
+take the input set and recalculate the fitness value. the function is :
+fairness_coef  * fairness + local_coef * locality + res_util_coef * res_util + energy_coef * energy - scaling_pen_coef scaling_pen
+
+"""
+
+def fairness(genotype):
+    # iterate over the tasks and determine the place in queue for all tenants
+    #current tenant ids is list of dictonary with the id and a tuple with count of the tasksqueue position and count of number of tasks
+
+    #this is dictonary with tenant id as key and array of size 2. idx0: sum of taskqueue positions idx1: number of tasks the tenant has pending
+    current_tenant_ids = {}
+    for gene in genotype.gene_array:
+        for task_queue_position in range(1,len(gene.tasksqueue)+1):
+            if len(current_tenant_ids) == 0:
+                current_tenant_ids[gene.tasksqueue[task_queue_position - 1].tenant.id] = [task_queue_position, 1]
+            elif gene.tasksqueue[task_queue_position- 1].tenant.id not in current_tenant_ids:
+                current_tenant_ids[gene.tasksqueue[task_queue_position- 1].tenant.id] = [task_queue_position, 1]
+            else:
+                current_tenant_ids[gene.tasksqueue[task_queue_position- 1].tenant.id][0] = current_tenant_ids[gene.tasksqueue[task_queue_position- 1].tenant.id][0] + task_queue_position
+                current_tenant_ids[gene.tasksqueue[task_queue_position- 1].tenant.id][1] = current_tenant_ids[gene.tasksqueue[task_queue_position- 1].tenant.id][1] + 1
+
+    #mean squared error from mean taskqueue sum
+    #normalizing would require debilitating performance cuts so we dont
+
+    #values tasknumber divided by sum of taskposition list of number between 0 and 1 1 is best
+    normalized_fairness = list(map(lambda x: x[1]/x[0], current_tenant_ids.values()))
+    
+    mean_normalized_fairness = sum(normalized_fairness)/len(current_tenant_ids)
+    error = sum(map(lambda x : abs(x - mean_normalized_fairness), normalized_fairness))/len(normalized_fairness)
+
+    #error between 0 and 1 0 being better but we want 1 being better so:
+    return 1 - error
+
+def locality(genotype):
+    #without node level metrics it might be better to just check how many of the tasks of the same tenant are on the same node
+    #calc average amount of ndoes that the tasks of the same tenant are scheduled to should be as low as possible
+    #each gene has necessarily a different resource
+    
+    #this is dictonary with tenant id as key and array of size 3. idx0: number of tasks the tenant has pending, idx1: number of nodes they are scheduled on, idx2: the last resource a pedning task was encountered
+    current_tenant_ids = {}
+    gene_counter = 0
+    for gene in genotype.gene_array:
+        for task_queue_position in range(len(gene.tasksqueue)):
+            if len(current_tenant_ids) == 0:
+                current_tenant_ids[gene.tasksqueue[task_queue_position].tenant.id] = [1, 1, gene_counter]
+            elif gene.tasksqueue[task_queue_position].tenant.id not in current_tenant_ids:
+                current_tenant_ids[gene.tasksqueue[task_queue_position].tenant.id] = [1, 1, gene_counter]
+            elif gene_counter >= current_tenant_ids[gene.tasksqueue[task_queue_position].tenant.id][2]:
+                current_tenant_ids[gene.tasksqueue[task_queue_position].tenant.id][0] = current_tenant_ids[gene.tasksqueue[task_queue_position].tenant.id][0] +1
+                if gene_counter > current_tenant_ids[gene.tasksqueue[task_queue_position].tenant.id][2]:
+                    current_tenant_ids[gene.tasksqueue[task_queue_position].tenant.id][1] = current_tenant_ids[gene.tasksqueue[task_queue_position].tenant.id][1] +1
+                    current_tenant_ids[gene.tasksqueue[task_queue_position].tenant.id][2] = gene_counter
+        gene_counter = gene_counter + 1
+    
+    #number between 0 and 1 0 being better ratio of number of resources and number of tasks  
+    noramlized_resources_per_tenant = list(map(lambda x : 0 if x[1]==1 else x[1]/x[0], current_tenant_ids.values()))
+    
+    #between 0 and 1, closer to 0 being better
+    mean_noramlized_resources_per_tenant = sum(noramlized_resources_per_tenant)/ len(current_tenant_ids)
+
+    #should be closer to 1 is better
+    return 1 - mean_noramlized_resources_per_tenant
+
+
+
+
+
+def fitness_eval(to_eval):
+    if not isinstance(to_eval[0], Genotype):
+        raise TypeError("fitness eval called with wrong parameter type")
+    for genotype in to_eval:
+        genotype.fitnessvalue = fairness_coef * fairness(genotype) + local_coef * locality(genotype)
     
 
+#iterate n times. N being equal to poolsize
 
 
 """
@@ -127,18 +227,41 @@ def init(poolsize, inital_taks_queue):
     if len(inital_taks_queue) < 1:
         raise Exception("init called with empty task queue")
     
+    pool = []
 
 #iterate n times. N being equal to poolsize
-    for i in range(poolsize -1):
-        genotype = Genotype([])
+    for i in range(poolsize):
+        genotype = Genotype([], 0)
         for resource in current_resources.resource_array:
             gene = Gene(resource, [])
             genotype.gene_array.append(gene)
         for task in inital_taks_queue:
-            resource_id = randint(0, len(current_resources.resource_array) -1)# including the last number so minus one for index
+            resource_id = randint(0, len(current_resources.resource_array))# including the last number so minus one for index
             genotype.gene_array[resource_id].tasksqueue.append(task)
-    return genotype
+        pool.append(genotype)
+        fitness_eval(pool)
+    return pool
 
+
+"""
+input:  
+    - n_parents (int): is the number of parents returned
+    - k(int): how many parents are considered for each tournament
+output: 
+    - a set of parents to be taken for crossover
+constrains:
+    - the poolsize has to fit the resource the deamon is scheduled on
+description:
+
+Initialize the pool of genotypes with randomized Genotypes
+"""
+def parent_selection(n_parents, k):
+    if type(n_parents) is not int:
+        raise TypeError("parent selection called with wrong parameter type")
+    if type(k) is not int:
+        raise TypeError("parent selection called with wrong parameter type")
+
+#iterate n times. N being equal to poolsize
 
 
     
@@ -147,16 +270,18 @@ def init(poolsize, inital_taks_queue):
 input:  
     - first parent (Genotype): the first parent for the crossover
     - second parent(Genotype): the second parent for the crossover
-    - minimum_prozent(float): number between 0 and 1 prozent of genes from parent in first step
+    - k(int): number of crossoverpoints
 output:
     - child (Genotype): a child that is a combination of the parents
 constrains:
     - Small changes to a genotype induce small changes in the corresponding phenotypes
     - tasks cannot be duplicated and all tasks have to be assigned
 description:
-
-
-maybe try to change which parents queue lengths are used
+has to be meaningful representation of both parents. Therefore, for each gene for the taskqueue it is important where the task is placed in what order and how many there are placed on a node.
+To do this for each child take the number of tasks per node from one parent wholesale. For the order and what node thez are placed on take the taskqueue from both parents decide a crossoverpoint
+and for the first tasks up to the crossover point try to take primarly from one parent and for every task after the crossover point try to take primarly from the other. The order is try to take 
+from the desired parent if that does not work try to take from the other parent if that does not work take from the tasks that are leftover. The tasks that are leftover are updated after each gene
+by taking all the leftover tasks from both parents and adding them to the leftover tasks.
 
 """
 def partially_mapped_crossover(parent1, parent2, k=1):
