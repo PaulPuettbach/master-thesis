@@ -12,7 +12,7 @@ locality based on observed message latency is difficult needs to be added to eac
 resource utilization dk how to do this one we can get state now and then guestimate i think
 enregy efficiency is also resource utilization
 
-order is init crossover mutation fitnesscalc selection crossover etc.
+order is init fitnesscalc parent_selection crossover mutation fitnesscalc selection crossover etc.
 
 
 
@@ -26,7 +26,7 @@ init: random
 
 fitnesscalc: fitnessfunctions
 
-parent selection: k tournament selection  change k to change selection pressure
+parent selection: k tournament selection  change k to change selection pressure without replacement and it should be fine
 
 crossover: k point two parent crossover
 
@@ -212,7 +212,7 @@ input:
     - poolsize (int) is the number of genotypes creates
     - inital_taks_queue ([tasks]) the pending tasks at the time of the the init
 output: 
-    - a full pool of genotypes
+    - an array of size poolsize of genotypes
 constrains:
     - the poolsize has to fit the resource the deamon is scheduled on
 description:
@@ -236,7 +236,7 @@ def init(poolsize, inital_taks_queue):
             gene = Gene(resource, [])
             genotype.gene_array.append(gene)
         for task in inital_taks_queue:
-            resource_id = randint(0, len(current_resources.resource_array))# including the last number so minus one for index
+            resource_id = randint(0, len(current_resources.resource_array) -1 )# including the last number so minus one for index
             genotype.gene_array[resource_id].tasksqueue.append(task)
         pool.append(genotype)
         fitness_eval(pool)
@@ -246,20 +246,38 @@ def init(poolsize, inital_taks_queue):
 """
 input:  
     - n_parents (int): is the number of parents returned
-    - k(int): how many parents are considered for each tournament
+    - k(int): how many parents are considered for each tournament increase this to increase the
+    selection pressure
 output: 
     - a set of parents to be taken for crossover
-constrains:
-    - the poolsize has to fit the resource the deamon is scheduled on
 description:
-
-Initialize the pool of genotypes with randomized Genotypes
 """
-def parent_selection(n_parents, k):
-    if type(n_parents) is not int:
+def parent_selection(n_parents, k, population):
+    if not isinstance(n_parents, int) or not isinstance(k, int):
         raise TypeError("parent selection called with wrong parameter type")
-    if type(k) is not int:
-        raise TypeError("parent selection called with wrong parameter type")
+
+    mating_pool = []
+    
+    for _ in range(n_parents):
+        potential_mates = random.sample(population, k)
+        best_mate = max(potential_mates, key=lambda mate: mate.fitnessvalue)
+        mating_pool.append(best_mate)
+
+    return mating_pool
+        
+
+
+# BEGIN
+# /* Assume we wish to select λ members of a pool of μ individuals */
+# set current member = 1;
+# WHILE ( current member ≤ λ ) DO
+# Pick k individuals randomly, with or without replacement;
+# Compare these k individuals and select the best of them;
+# Denote this individual as i;
+# set mating pool[current member] = i;
+# set current member = current member + 1;
+# OD
+# END
 
 #iterate n times. N being equal to poolsize
 
@@ -400,7 +418,7 @@ def partially_mapped_crossover(parent1, parent2, k=1):
 """
 input:  
     - input_array([Genotype]): a list of all the Genotypes that need to be mutated
-    - mutation_coefficient1(float): between 0 and 1 mutation chance for each of the genes
+    - mutation_coefficient1(float): between 0 and 1 mutation chance for each of the genes that random task is taken and appended to another node
 output:
     - output_array([Genotype]): a list of all the now mutated Genotypes
 constrains:
@@ -411,24 +429,7 @@ def mutation(input_array, mutation_coefficient1, mutation_coefficient2, mutation
         raise TypeError("init called with wrong parameter type")
     for genotype in input_array:
         if random() <= mutation_coefficient1:
+
             
-
-
-# for i in range(k +1):
-#             #on even take parent 1
-#             if i % 2 == 0:
-#                 #the last bit
-#                 if i == k:
-#                     child.append(parent1.array[(i * n_genes_per_chunk):])
-#                 else:
-#                     child.append(parent1.array[(i * n_genes_per_chunk):((i+1) * (n_genes_per_chunk))])
-#             #on odd take parent 2
-#             if i % 2 == 1:
-#                             #the last bit
-#                 if i == k:
-#                     child.append(parent2.array[(i * n_genes_per_chunk):])
-#                 else:
-#                     child.append(parent2.array[(i * n_genes_per_chunk):((i+1) * (n_genes_per_chunk))])
-#     return child
 
 """Egress"""
