@@ -3,7 +3,6 @@ import math
 from random import randint, random
 from bitmap import BitMap
 
-app = Flask(__name__)
 """
 fairness based on queue are all tenants getting teh same resources
 
@@ -38,7 +37,11 @@ replacement: elitism
 lambda amount of children and mue number of parents
 """
 
+"""Init"""
+#get the initalwokqueue
+
 """Ingress"""
+app = Flask(__name__)
 
 #-----this is from the main scheduler-----#
 #get updates of workqueue from the main scheduler
@@ -429,7 +432,6 @@ def mutation(input_array, mutation_coefficient1, mutation_coefficient2, mutation
         raise TypeError("init called with wrong parameter type")
     for genotype in input_array:
         if random() <= mutation_coefficient1:
-
             
 
 """Egress"""

@@ -19,6 +19,12 @@ v1=client.CoreV1Api()
 scheduler_name = "EA"
 app = Flask(__name__)
 
+"""global variables"""
+#make dictonary 
+taks_dic = []
+id_counter = 0
+
+
 # @app.route('/', methods=['POST'])
 # def result():
 #     print(request.form['foo']) # should display 'bar'
@@ -53,7 +59,7 @@ def watch_pod():
     # still in the default namespace
     for event in w.stream(v1.list_namespaced_pod, "default"):
         if event['object'].status.phase == "Pending" and event['object'].spec.scheduler_name == scheduler_name:
-            # do something
+              
 
 # only need this if the number of nodes changes
 # def watch_node():
