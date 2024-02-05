@@ -1,6 +1,6 @@
 apiVersion: v2
-name: main-helm-chart
-description: an overarching helm chart for the other helm charts to be based off of
+name: scheduler
+description: the main helm chart for the release of the scheduler
 
 # A chart can be either an 'application' or a 'library' chart.
 #

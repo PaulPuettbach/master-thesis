@@ -1,4 +1,4 @@
-kind: ReplicationController
+   kind: ReplicationController
 apiVersion: v1
 metadata:
   name: zeppelin-controller

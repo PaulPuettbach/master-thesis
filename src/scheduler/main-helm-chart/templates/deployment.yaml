@@ -33,8 +33,11 @@ spec:
         - name: {{ .Chart.Name }}
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
-          image: "{{ .Values.main_component_image.repository }}:{{ .Values.main_component_image.tag | default .Chart.AppVersion }}"
-          imagePullPolicy: {{ .Values.main_component_image.pullPolicy }}
+          image: "{{ .Values.main_component.image.repository }}:{{ .Values.main_component.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.main_component.image.pullPolicy }}
+          env:
+          - name: DAEMON-SERVICE
+            value: {{ include "main-helm-chart.fullname" . }}{{ .Values.daemon.service.name }}
           ports:
             - name: http
               containerPort: 80

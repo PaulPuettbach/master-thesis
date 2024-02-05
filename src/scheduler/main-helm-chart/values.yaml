@@ -4,25 +4,32 @@
 
 replicaCount: 1
 
-main_component_image:
-  repository: main-component
-  pullPolicy: Never
-  # Overrides the image tag whose default is the chart version.
-  tag: latest
+main_component:
+  service:
+    name: -main-service
+  image:
+    repository: main-component
+    pullPolicy: Never
+    # Overrides the image tag whose default is the chart version.
+    tag: latest
 
-daemon_image:
-  repository: daemon
-  pullPolicy: Never
-  # Overrides the image tag whose default is the chart version.
-  tag: latest
+
+daemon:
+  service:
+    name: -daemon-service
+  image:
+    repository: daemon
+    pullPolicy: Never
+    # Overrides the image tag whose default is the chart version.
+    tag: latest
 
 imagePullSecrets: []
 nameOverride: ""
 fullnameOverride: ""
 
-# serviceAccount:
-#   # Specifies whether a service account should be created
-#   create: true
+serviceAccount:
+  # Specifies whether a service account should be created
+  create: false
 #   # Annotations to add to the service account
 #   annotations: {}
 #   # The name of the service account to use.
@@ -42,6 +49,7 @@ securityContext: {}
   # runAsNonRoot: true
   # runAsUser: 1000
 
+#overlap between both of the services should not matter as they both get assigned different IP addresses
 service:
   type: ClusterIP
   port: 80

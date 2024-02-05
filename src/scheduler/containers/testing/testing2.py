@@ -1,6 +1,5 @@
 import math
-from random import randint
-from bitmap import BitMap
+from random import randint, choice, random
 
 class Tenant:
     def __init__(self,id):
@@ -64,63 +63,31 @@ class current_resources:
     def __str__(self):
         return f'current_resources(size: {len(self.resource_array)}, list of nodes: {self.resource_array})'
 
-def fairness(genotype):
-    # iterate over the tasks and determine the place in queue for all tenants
-    #current tenant ids is list of dictonary with the id and a tuple with count of the tasksqueue position and count of number of tasks
+"""
+input:  
+    - input_array([Genotype]): a list of all the Genotypes that need to be mutated
+    - mutation_coefficient1(float): between 0 and 1 mutation chance for each of the genes that random task is taken and added to another node
+    - mutation_coefficient2(float): between 0 and 1 mutation chance for an entire taskqueue to be appended to be swapped between nodes
+output:
+    - output_array([Genotype]): a list of all the now mutated Genotypes
+constrains:
+    - same order of input and output array
+"""
+def mutation(input_array, mutation_coefficient1):#, mutation_coefficient2, mutation_coefficient3):
+    if not isinstance(input_array[0], Genotype):
+        raise TypeError("init called with wrong parameter type")
+    for genotype in input_array:
+        for gene in genotype.gene_array:
+            if random() <= mutation_coefficient1:
+                #need to switch one task of the current gene with another task of a random gene
+                switch_gene_other_idx = choice(range(len(genotype.gene_array)))
+                switch_task_other_idx = choice(range(len(genotype.gene_array[switch_gene_other_idx].tasksqueue)))
+                switch_task_this_idx = choice(range(len(gene.tasksqueue)))
 
-    #this is dictonary with tenant id as key and array of size 2. idx0: sum of taskqueue positions idx1: number of tasks the tenant has pending
-    current_tenant_ids = {}
-    for gene in genotype.gene_array:
-        for task_queue_position in range(1,len(gene.tasksqueue)+1):
-            if len(current_tenant_ids) == 0:
-                current_tenant_ids[gene.tasksqueue[task_queue_position - 1].tenant.id] = [task_queue_position, 1]
-            elif gene.tasksqueue[task_queue_position- 1].tenant.id not in current_tenant_ids:
-                current_tenant_ids[gene.tasksqueue[task_queue_position- 1].tenant.id] = [task_queue_position, 1]
-            else:
-                current_tenant_ids[gene.tasksqueue[task_queue_position- 1].tenant.id][0] = current_tenant_ids[gene.tasksqueue[task_queue_position- 1].tenant.id][0] + task_queue_position
-                current_tenant_ids[gene.tasksqueue[task_queue_position- 1].tenant.id][1] = current_tenant_ids[gene.tasksqueue[task_queue_position- 1].tenant.id][1] + 1
 
-    #mean squared error from mean taskqueue sum
-    #normalizing would require debilitating performance cuts so we dont
-
-    #values tasknumber divided by sum of taskposition list of number between 0 and 1 1 is best
-    normalized_fairness = list(map(lambda x: x[1]/x[0], current_tenant_ids.values()))
-    
-    mean_normalized_fairness = sum(normalized_fairness)/len(current_tenant_ids)
-    error = sum(map(lambda x : abs(x - mean_normalized_fairness), normalized_fairness))/len(normalized_fairness)
-
-    #error between 0 and 1 0 being better but we want 1 being better so:
-    return 1 - error
-
-def locality(genotype):
-    #without node level metrics it might be better to just check how many of the tasks of the same tenant are on the same node
-    #calc average amount of ndoes that the tasks of the same tenant are scheduled to should be as low as possible
-    #each gene has necessarily a different resource
-    
-    #this is dictonary with tenant id as key and array of size 3. idx0: number of tasks the tenant has pending, idx1: number of nodes they are scheduled on, idx2: the last resource a pedning task was encountered
-    current_tenant_ids = {}
-    gene_counter = 0
-    for gene in genotype.gene_array:
-        for task_queue_position in range(len(gene.tasksqueue)):
-            if len(current_tenant_ids) == 0:
-                current_tenant_ids[gene.tasksqueue[task_queue_position].tenant.id] = [1, 1, gene_counter]
-            elif gene.tasksqueue[task_queue_position].tenant.id not in current_tenant_ids:
-                current_tenant_ids[gene.tasksqueue[task_queue_position].tenant.id] = [1, 1, gene_counter]
-            elif gene_counter >= current_tenant_ids[gene.tasksqueue[task_queue_position].tenant.id][2]:
-                current_tenant_ids[gene.tasksqueue[task_queue_position].tenant.id][0] = current_tenant_ids[gene.tasksqueue[task_queue_position].tenant.id][0] +1
-                if gene_counter > current_tenant_ids[gene.tasksqueue[task_queue_position].tenant.id][2]:
-                    current_tenant_ids[gene.tasksqueue[task_queue_position].tenant.id][1] = current_tenant_ids[gene.tasksqueue[task_queue_position].tenant.id][1] +1
-                    current_tenant_ids[gene.tasksqueue[task_queue_position].tenant.id][2] = gene_counter
-        gene_counter = gene_counter + 1
-    
-    #number between 0 and 1 0 being better ratio of number of resources and number of tasks  
-    noramlized_resources_per_tenant = list(map(lambda x : 0 if x[1]==1 else x[1]/x[0], current_tenant_ids.values()))
-    
-    #between 0 and 1, closer to 0 being better
-    mean_noramlized_resources_per_tenant = sum(noramlized_resources_per_tenant)/ len(current_tenant_ids)
-
-    #should be closer to 1 is better
-    return 1 - mean_noramlized_resources_per_tenant
+                switch_temp = genotype.gene_array[switch_gene_other_idx].tasksqueue[switch_task_other_idx]
+                genotype.gene_array[switch_gene_other_idx].tasksqueue[switch_task_other_idx] = gene.tasksqueue[switch_task_this_idx]
+                gene.tasksqueue[switch_task_this_idx] = switch_temp
 
 
 
@@ -128,16 +95,15 @@ parent1 = Genotype([Gene("node1", [Task(2,"pending", Tenant(1)),Task(3,"pending"
 parent2 = Genotype([Gene("node1", [Task(8,"pending", Tenant(1)),Task(4,"pending", Tenant(2))]), Gene("node2", [Task(6,"pending", Tenant(2)), Task(1,"pending", Tenant(3)), Task(2,"pending", Tenant(1))]), Gene("node3", [Task(5,"pending", Tenant(1)),Task(3,"pending", Tenant(1)), Task(7,"pending", Tenant(1))])])
 
 
-fair1 = fairness(parent1)
-fair2 = fairness(parent2)
+mutation_coefficient1 = 0.4
+print("---------before----------\n")
+print(f"this is the parent1 {parent1}")
+print(f"this is the parent2 {parent2}")
 
-print(f"this is the parent1 fairness {fair1}")
-print(f"this is the parent2 fairness {fair2}")
+mutation([parent1, parent2], mutation_coefficient1)
 
-local1 = locality(parent1)
-local2 = locality(parent2)
-
-print(f"this is the parent1 locality {local1}")
-print(f"this is the parent2 locality {local2}")
+print("----------------after---------------\n")
+print(f"this is the parent1 {parent1}")
+print(f"this is the parent2 {parent2}")
 
                 

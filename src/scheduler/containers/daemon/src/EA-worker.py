@@ -1,6 +1,6 @@
 from flask import Flask, request
 import math
-from random import randint, random
+from random import randint, random, choice
 from bitmap import BitMap
 
 """
@@ -11,7 +11,7 @@ locality based on observed message latency is difficult needs to be added to eac
 resource utilization dk how to do this one we can get state now and then guestimate i think
 enregy efficiency is also resource utilization
 
-order is init fitnesscalc parent_selection crossover mutation fitnesscalc selection crossover etc.
+order is init fitnesscalc parent_selection crossover mutation fitnesscalc selection parent_selection etc.
 
 
 
@@ -20,6 +20,18 @@ we do island model to preserve diversity no improvement for x generations
 over selection: In this method, the population is first ranked by fitness and then divided into two groups, the top x% in
 one and the remaining (100 - x)% in the other. When parents are selected, 80% of the selection operations
 choose from the first group, and the other 20% from the second.
+
+or we do:
+(μ, λ) Selection The (μ, λ) strategy used in Evolution Strategies where
+typically λ>μ children are created from a population of μ parents. This
+method works on a mixture of age and fitness. The age component means
+that all the parents are discarded, so no individual is kept for more than
+one generation (although of course copies of it might exist later). The fitness
+component comes from the fact that the λ offspring are ranked according to
+the fitness, and the best μ form the next generation
+    - this seems better because we have no interest in keeping parents since we want to escape local optima and
+    the state of the problem changes with each new pod coming in so parent solutions become stale quick anyway
+    it doesnt even safe computational effort as we will have to recalc fitness with each new pod anyway
 
 init: random
 
@@ -35,24 +47,15 @@ replacement: elitism
 
 
 lambda amount of children and mue number of parents
+
+
+notes from book
+we have a multimodal problem and we dont want a genetic drift
+i would argue we dont even need to exchange the individuals because the problem definition changes somewhat often anyway
 """
 
 """Init"""
 #get the initalwokqueue
-
-"""Ingress"""
-app = Flask(__name__)
-
-#-----this is from the main scheduler-----#
-#get updates of workqueue from the main scheduler
-@app.route('/workqueue', methods=['POST'])
-def workqueue():
-    print("update from main scheduler to the workqueue")
-
-# # get updates on own resource utilization to change pool size
-# @app.route('/change_pool', methods=['POST'])
-# def node_status():
-#     print("update from main scheduler to the pool")
 
 
 """Logic"""
@@ -87,7 +90,7 @@ class Task:
             return f'migration_task({self.id}, status: {self.status}, ({self.tenant}), migrate_to : {self.migrate_to})'
     
 class Gene:
-    def __init__(self,resource, tasksqueue):
+    def __init__(self, resource, tasksqueue):
         self.resource = resource
         self.tasksqueue = tasksqueue
     
@@ -104,6 +107,8 @@ class Genotype:
 
     def __str__(self):
         return f'genotype(fitness{self.fitnessvalue}, {self.gene_array})'
+    def __repr__(self):
+        return f'genotype(fitness{self.fitnessvalue}, {self.gene_array})'
     
 class Population:
     def __init__(self, population):
@@ -111,19 +116,34 @@ class Population:
 
     def __str__(self):
         return f'Population(size: {len(self.population)}, first 10 genotypes: {self.population[0:10]})'
+    def __repr__(self):
+        return f'Population(size: {len(self.population)}, first 10 genotypes: {self.population[0:10]})'
     
-class current_resources:
+class Current_resources:
     def __init__(self, resource_array):
         self.resource_array = resource_array
 
     def __str__(self):
         return f'current_resources(size: {len(self.resource_array)}, list of nodes: {self.resource_array})'
+    def __repr__(self):
+        return f'current_resources(size: {len(self.resource_array)}, list of nodes: {self.resource_array})'
+
+class Node:
+    def __init__(self,id):
+        self.id = id
+    
+    def __str__(self):
+        return f'Node(id: {id})'
+    def __repr__(self):
+        return f'Node(id: {id})'
 
 """
 gloabl variables
 """
 fairness_coef = 0.3
 local_coef = 0.7
+population = Population([])
+current_resources = Current_resources([])
 
 
 """
@@ -133,8 +153,8 @@ input:
 output: 
     - NA the input will be updated with new fitness values
 description:
-take the input set and recalculate the fitness value. the function is :
-fairness_coef  * fairness + local_coef * locality + res_util_coef * res_util + energy_coef * energy - scaling_pen_coef scaling_pen
+    take the input set and recalculate the fitness value. the function is :
+    fairness_coef  * fairness + local_coef * locality + res_util_coef * res_util + energy_coef * energy - scaling_pen_coef scaling_pen
 
 """
 
@@ -219,8 +239,7 @@ output:
 constrains:
     - the poolsize has to fit the resource the deamon is scheduled on
 description:
-
-Initialize the pool of genotypes with randomized Genotypes
+    Initialize the pool of genotypes with randomized Genotypes
 """
 def init(poolsize, inital_taks_queue):
     if type(poolsize) is not int:
@@ -245,6 +264,57 @@ def init(poolsize, inital_taks_queue):
         fitness_eval(pool)
     return pool
 
+"""
+input:  
+    - n: the number of individuals to select(should be the population size of the coming epoch)
+    - to_select: the set of individuals from which to select the next population this is an array of genotypes
+output: 
+    - updated population
+description:
+    there should be mu parents and lambda children mixed together and we disregardded all the parents and must now choose among the lamda children
+    the input shoudl just be the children and we do the rest when calling the function
+"""
+def selection(n, to_select):
+    if n > len(arr):
+        return "Error: n is greater than the size of the array."
+    
+    """utility functions start ------------------------------------------"""
+    #standard quicksort adaption where we sort till we find the exact pivot that is the nth element from the top
+    def partition(arr, low, high):
+        pivot = arr[high].fitnessvalue
+        i = low - 1
+
+        for j in range(low, high):
+            if arr[j].fitnessvalue >= pivot:
+                i = i + 1
+                #for every initial element where j >= i the element is getting switched with itself
+                # i am guessing that would get optimized by the compiler but for now i test to save the obsolete
+                # instruction
+                if i == j:
+                    continue
+                arr[i], arr[j] = arr[j], arr[i]
+
+        arr[i + 1], arr[high] = arr[high], arr[i + 1]
+        return i + 1
+
+    def quicksort(arr, low, high, n):
+        pi = partition(arr, low, high)
+        
+        #found the nth biggest element as the pivot
+        if pi == n:
+            return arr[:n]
+        #the pivot is not in the nth biggest elements we have to check from the pivot till the top of the array
+        elif pi < n:
+            return quicksort(arr, pi + 1, high, n)
+        #the pivot is bigger than the nth element we should check from the end of the array to the pivot
+        else:
+            return quicksort(arr, low, pi - 1, n)
+    """utility functions end ------------------------------------------"""
+
+    return quicksort(to_select, 0, len(to_select) - 1, n)
+    
+
+
 
 """
 input:  
@@ -254,6 +324,7 @@ input:
 output: 
     - a set of parents to be taken for crossover
 description:
+    find a number of parents acording to tournament selction the higher the k the higher the selection pressure
 """
 def parent_selection(n_parents, k, population):
     if not isinstance(n_parents, int) or not isinstance(k, int):
@@ -298,11 +369,11 @@ constrains:
     - Small changes to a genotype induce small changes in the corresponding phenotypes
     - tasks cannot be duplicated and all tasks have to be assigned
 description:
-has to be meaningful representation of both parents. Therefore, for each gene for the taskqueue it is important where the task is placed in what order and how many there are placed on a node.
-To do this for each child take the number of tasks per node from one parent wholesale. For the order and what node thez are placed on take the taskqueue from both parents decide a crossoverpoint
-and for the first tasks up to the crossover point try to take primarly from one parent and for every task after the crossover point try to take primarly from the other. The order is try to take 
-from the desired parent if that does not work try to take from the other parent if that does not work take from the tasks that are leftover. The tasks that are leftover are updated after each gene
-by taking all the leftover tasks from both parents and adding them to the leftover tasks.
+    has to be meaningful representation of both parents. Therefore, for each gene for the taskqueue it is important where the task is placed in what order and how many there are placed on a node.
+    To do this for each child take the number of tasks per node from one parent wholesale. For the order and what node thez are placed on take the taskqueue from both parents decide a crossoverpoint
+    and for the first tasks up to the crossover point try to take primarly from one parent and for every task after the crossover point try to take primarly from the other. The order is try to take 
+    from the desired parent if that does not work try to take from the other parent if that does not work take from the tasks that are leftover. The tasks that are leftover are updated after each gene
+    by taking all the leftover tasks from both parents and adding them to the leftover tasks.
 
 """
 def partially_mapped_crossover(parent1, parent2, k=1):
@@ -421,17 +492,47 @@ def partially_mapped_crossover(parent1, parent2, k=1):
 """
 input:  
     - input_array([Genotype]): a list of all the Genotypes that need to be mutated
-    - mutation_coefficient1(float): between 0 and 1 mutation chance for each of the genes that random task is taken and appended to another node
+    - mutation_coefficient1(float): between 0 and 1 mutation chance for each of the genes that random task is taken and added to another node
+    - mutation_coefficient2(float): between 0 and 1 mutation chance for an entire taskqueue to be appended to be swapped between nodes
 output:
     - output_array([Genotype]): a list of all the now mutated Genotypes
 constrains:
     - same order of input and output array
+description:
+    for each resource node in the schedule of each individual (genotype) there is a chance to swap one task of that resource node with the task of another
+    resource node: important to note if the second chosen node does not have any resources no further attempts are made to find another node to save compution time
+    this should be included in the determination of the mutation coefficient 
 """
-def mutation(input_array, mutation_coefficient1, mutation_coefficient2, mutation_coefficient3):
+def mutation(input_array, mutation_coefficient1):#, mutation_coefficient2, mutation_coefficient3):
     if not isinstance(input_array[0], Genotype):
         raise TypeError("init called with wrong parameter type")
     for genotype in input_array:
-        if random() <= mutation_coefficient1:
-            
+        for gene in genotype.gene_array:
+            if random() <= mutation_coefficient1 and len(gene.tasksqueue) != 0:
+                #need to switch one task of the current gene with another task of a random gene
+                switch_gene_other_idx = choice(range(len(genotype.gene_array)))
+                switch_gene_taskqueue_len = len(genotype.gene_array[switch_gene_other_idx].tasksqueue)
+                if switch_gene_taskqueue_len == 0:
+                    continue
+                switch_task_other_idx = choice(range(switch_gene_taskqueue_len))
+                switch_task_this_idx = choice(range(len(gene.tasksqueue)))
 
-"""Egress"""
+
+                switch_temp = genotype.gene_array[switch_gene_other_idx].tasksqueue[switch_task_other_idx]
+                genotype.gene_array[switch_gene_other_idx].tasksqueue[switch_task_other_idx] = gene.tasksqueue[switch_task_this_idx]
+                gene.tasksqueue[switch_task_this_idx] = switch_temp
+
+"""Ingress"""
+app = Flask(__name__)
+
+#-----this is from the main scheduler-----#
+#get updates of workqueue from the main scheduler
+@app.route('/workqueue', methods=['POST'])
+def workqueue():
+    print("update from main scheduler to the workqueue")
+
+# # get updates on own resource utilization to change pool size
+# @app.route('/change_pool', methods=['POST'])
+# def node_status():
+#     print("update from main scheduler to the pool")
+"""Egress""" 

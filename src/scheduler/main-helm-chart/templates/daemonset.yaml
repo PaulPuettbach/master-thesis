@@ -1,7 +1,7 @@
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
-  name: {{ include "main-helm-chart.fullname" . }}
+  name: {{ include "main-helm-chart.fullname" . }}-daemon
   labels:
     {{- include "main-helm-chart.labels" . | nindent 4 }}
 spec:
@@ -27,13 +27,16 @@ spec:
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
-        - name: {{ .Chart.Name }}
+        - name: {{ .Chart.Name }}-daemon
           {{- with .Values.securityContext }}
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
           {{- end }}
-          image: "{{ .Values.daemon_image.repository }}:{{ .Values.daemon_image.tag | default .Chart.AppVersion }}"
-          imagePullPolicy: {{ .Values.daemon_image.pullPolicy }}
+          image: "{{ .Values.daemon.image.repository }}:{{ .Values.daemon.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.daemon.image.pullPolicy }}
+          env:
+          - name: MAIN-SERVICE
+            value: {{ include "main-helm-chart.fullname" . }}{{ .Values.main_component.service.name }}
           ports:
             - name: http
               containerPort: 80
