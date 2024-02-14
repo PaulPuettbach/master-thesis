@@ -59,8 +59,10 @@ i would argue we dont even need to exchange the individuals because the problem 
 
 
 """Logic"""
-class tenant:
+class Tenant:
     def __init__(self,id):
+        if not(isinstance(id, int) and id >= 0):
+            raise ValueError(f"integer bigger or equal to 0 expected, got {id}")
         self.id = id
     
     def __str__(self):
@@ -70,11 +72,26 @@ class tenant:
         return f'tenant({self.id})'
     
 class Task:
-    def __init__(self,id, status, tenant, migration = False, migrate_to = ""):
+    def __init__(self,id, status, tenant, migration = False, migrate_to = None):
+        if not(isinstance(id, int) and id >= 0):
+            raise ValueError(f"id as integer bigger or equal to 0 expected, got {id}")
         self.id = id
+
+        allowed_status = ["Pending", "Schedule", "Finished"]
+        if not(isinstance(status, str) and status in allowed_status):
+            raise ValueError(f"status should be one of \"Pending\", \"Schedule\", \"Finished\" expected, got {status}")
         self.status = status
+
+        if not(isinstance(tenant, int) and tenant >= 0):
+            raise ValueError(f"tenant should be integer bigger or equal to 0 expected, got {tenant}")
         self.tenant = tenant
+
+        if not isinstance(migration, bool):
+            raise ValueError(f"migration should be boolean, got {migration}")
         self.migration = migration
+
+        if not ((isinstance(migrate_to, Node) and migration == True) or (isinstance(migrate_to, type(None)) and migration == False)):
+            raise ValueError(f"migrate_to should be Node or None if migration is set to false, got {migrate_to}")
         self.migrate_to = migrate_to
     
     def __str__(self):
@@ -90,9 +107,14 @@ class Task:
             return f'migration_task({self.id}, status: {self.status}, ({self.tenant}), migrate_to : {self.migrate_to})'
     
 class Gene:
-    def __init__(self, resource, tasksqueue):
+    def __init__(self, resource, _tasksqueue):
+        if not isinstance(resource, Node):
+            raise ValueError(f"resource should be Node, got {resource}")
         self.resource = resource
-        self.tasksqueue = tasksqueue
+
+        if not ((all(isinstance(task, Task) for task in _tasksqueue)) or (len(_tasksqueue) == 0)) :
+            raise ValueError("_tasksqueue should be a an empty list or contain Task objects")
+        self.tasksqueue = _tasksqueue
     
     def __str__(self):
         return f'genome({self.tasksqueue} on {self.resource})'
@@ -101,27 +123,58 @@ class Gene:
         return f'genome({self.tasksqueue} on {self.resource})' 
 
 class Genotype:
-    def __init__(self, gene_array, fitnessvalue):
-        self.gene_array = gene_array
+    def __init__(self, _gene_array, fitnessvalue = 0):
+        if not ((all(isinstance(gene, Gene) for gene in _gene_array)) or (len(_gene_array) == 0)) :
+            raise ValueError("_gene_array should be a an empty list or contain Gene objects")
+        self._gene_array = _gene_array
+
+        if not isinstance(fitnessvalue, float):
+            raise ValueError(f"fitnessvalue should be float, got {fitnessvalue} with type {type(fitnessvalue)}")
         self.fitnessvalue = fitnessvalue
+    
+    #if its unclear if the task is already in the genotype use this
+    def append_task(self, task, resource):
+        if not isinstance(task, Task):
+            raise ValueError(f"Only elements of type task can be appended, got {type(task)}")
+        if  any(task.id in task.id for task in (gene._tasksqueue for gene in self._gene_array)):
+            raise ValueError(f"Tasks need to be unique the task to append: {task}, is already in the genotype schedule")
+        for gene in self._gene_array:
+            if gene.resource == resource:
+                gene._tasksqueue.append(task)
 
     def __str__(self):
-        return f'genotype(fitness{self.fitnessvalue}, {self.gene_array})'
+        return f'genotype(fitness{self.fitnessvalue}, {self._gene_array})'
     def __repr__(self):
-        return f'genotype(fitness{self.fitnessvalue}, {self.gene_array})'
+        return f'genotype(fitness{self.fitnessvalue}, {self._gene_array})'
     
 class Population:
-    def __init__(self, population):
-        self.population = population
+    def __init__(self, population_array):
+        if not ((all(isinstance(genotype, Genotype) for genotype in population_array)) or (len(population_array) == 0)) :
+            raise ValueError("population_array should be a an empty list or contain Geneotype objects")
+        self.population_array = population_array
+
+    def append_genotype(self, genotype):
+        if not isinstance(genotype, Genotype):
+            raise ValueError(f"Only elements of type genotype can be appended to population_array, got {type(genotype)}")
+        self.population_array.append(genotype)
 
     def __str__(self):
-        return f'Population(size: {len(self.population)}, first 10 genotypes: {self.population[0:10]})'
+        return f'Population(size: {len(self.population_array)}, first 10 genotypes: {self.population_array[0:10]})'
     def __repr__(self):
-        return f'Population(size: {len(self.population)}, first 10 genotypes: {self.population[0:10]})'
+        return f'Population(size: {len(self.population_array)}, first 10 genotypes: {self.population_array[0:10]})'
     
-class Current_resources:
+class CurrentResources:
     def __init__(self, resource_array):
         self.resource_array = resource_array
+
+    def __str__(self):
+        return f'current_resources(size: {len(self.resource_array)}, list of nodes: {self.resource_array})'
+    def __repr__(self):
+        return f'current_resources(size: {len(self.resource_array)}, list of nodes: {self.resource_array})'
+
+class CurrentTaskqueue:
+    def __init__(self, task_array):
+        self.resource_array = task_array
 
     def __str__(self):
         return f'current_resources(size: {len(self.resource_array)}, list of nodes: {self.resource_array})'
