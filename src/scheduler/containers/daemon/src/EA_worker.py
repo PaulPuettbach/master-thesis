@@ -1,6 +1,6 @@
 from flask import Flask, request
 import math
-from random import randint, random, choice
+import random
 from bitmap import BitMap
 
 """
@@ -22,13 +22,13 @@ one and the remaining (100 - x)% in the other. When parents are selected, 80% of
 choose from the first group, and the other 20% from the second.
 
 or we do:
-(μ, λ) Selection The (μ, λ) strategy used in Evolution Strategies where
-typically λ>μ children are created from a population of μ parents. This
+(mu, lambda) Selection The (mu, lamda) strategy used in Evolution Strategies where
+typically lamda>mu children are created from a population of mu parents. This
 method works on a mixture of age and fitness. The age component means
 that all the parents are discarded, so no individual is kept for more than
 one generation (although of course copies of it might exist later). The fitness
-component comes from the fact that the λ offspring are ranked according to
-the fitness, and the best μ form the next generation
+component comes from the fact that the lamda offspring are ranked according to
+the fitness, and the best mu form the next generation
     - this seems better because we have no interest in keeping parents since we want to escape local optima and
     the state of the problem changes with each new pod coming in so parent solutions become stale quick anyway
     it doesnt even safe computational effort as we will have to recalc fitness with each new pod anyway
@@ -70,9 +70,14 @@ class Tenant:
     
     def __repr__(self): 
         return f'tenant({self.id})'
+    def __eq__(self, other):
+        if isinstance(other, Tenant):
+            return self.id == other.id
+        else:
+            raise ValueError(f"cant equate tenant to {type(other)}")
     
 class Task:
-    def __init__(self,id, status, tenant, migration = False, migrate_to = None):
+    def __init__(self,id, status, tenant, migration=False, migrate_to=None):
         if not(isinstance(id, int) and id >= 0):
             raise ValueError(f"id as integer bigger or equal to 0 expected, got {id}")
         self.id = id
@@ -82,7 +87,7 @@ class Task:
             raise ValueError(f"status should be one of \"Pending\", \"Schedule\", \"Finished\" expected, got {status}")
         self.status = status
 
-        if not(isinstance(tenant, int) and tenant >= 0):
+        if not(isinstance(tenant, Tenant) and tenant.id >= 0):
             raise ValueError(f"tenant should be integer bigger or equal to 0 expected, got {tenant}")
         self.tenant = tenant
 
@@ -105,58 +110,71 @@ class Task:
             return f'task({self.id}, status: {self.status}, ({self.tenant}))'
         else:
             return f'migration_task({self.id}, status: {self.status}, ({self.tenant}), migrate_to : {self.migrate_to})'
+    def __eq__(self, other):
+        if isinstance(other, Task):
+            return self.id == other.id and self.tenant == other.tenant
+        else:
+            raise ValueError(f"cant equate task to {type(other)}")
     
 class Gene:
-    def __init__(self, resource, _tasksqueue):
+    def __init__(self, resource, tasksqueue):
         if not isinstance(resource, Node):
             raise ValueError(f"resource should be Node, got {resource}")
         self.resource = resource
 
-        if not ((all(isinstance(task, Task) for task in _tasksqueue)) or (len(_tasksqueue) == 0)) :
-            raise ValueError("_tasksqueue should be a an empty list or contain Task objects")
-        self.tasksqueue = _tasksqueue
+        if not ((all(isinstance(task, Task) for task in tasksqueue)) or (len(tasksqueue) == 0)) :
+            raise ValueError("tasksqueue should be a an empty list or contain Task objects")
+        self.tasksqueue = tasksqueue
     
     def __str__(self):
         return f'genome({self.tasksqueue} on {self.resource})'
     
     def __repr__(self): 
-        return f'genome({self.tasksqueue} on {self.resource})' 
+        return f'genome({self.tasksqueue} on {self.resource})'
+    
+    def __eq__(self, other):
+        if isinstance(other, Gene):
+            return self.resource == other.resource and self.tasksqueue == other.tasksqueue
+        else:
+            raise ValueError(f"cant equate gene to {type(other)}")
 
 class Genotype:
-    def __init__(self, _gene_array, fitnessvalue = 0):
+    def __init__(self, _gene_array, fitnessvalue=0.0):
         if not ((all(isinstance(gene, Gene) for gene in _gene_array)) or (len(_gene_array) == 0)) :
             raise ValueError("_gene_array should be a an empty list or contain Gene objects")
         self._gene_array = _gene_array
 
-        if not isinstance(fitnessvalue, float):
-            raise ValueError(f"fitnessvalue should be float, got {fitnessvalue} with type {type(fitnessvalue)}")
+        if not isinstance(fitnessvalue, float) or fitnessvalue > 1 or fitnessvalue < 0:
+            raise ValueError(f"fitnessvalue should be float between 0.0 and 1.0, got {fitnessvalue} with type {type(fitnessvalue)}")
         self.fitnessvalue = fitnessvalue
     
     #if its unclear if the task is already in the genotype use this
-    def append_task(self, task, resource):
-        if not isinstance(task, Task):
-            raise ValueError(f"Only elements of type task can be appended, got {type(task)}")
-        if  any(task.id in task.id for task in (gene._tasksqueue for gene in self._gene_array)):
-            raise ValueError(f"Tasks need to be unique the task to append: {task}, is already in the genotype schedule")
+    def append_task(self, new_task, resource):
+        if not isinstance(new_task, Task):
+            raise ValueError(f"Only elements of type task can be appended, got {type(new_task)}")
+        all_task_ids = {task.id for gene in self._gene_array for task in gene.tasksqueue}
+        if any(new_task.id == id for id in all_task_ids):
+            raise ValueError(f"Tasks need to be unique the task to append: {new_task}, is already in the genotype schedule")
         for gene in self._gene_array:
             if gene.resource == resource:
-                gene._tasksqueue.append(task)
+                gene.tasksqueue.append(new_task)
 
     def __str__(self):
         return f'genotype(fitness{self.fitnessvalue}, {self._gene_array})'
     def __repr__(self):
         return f'genotype(fitness{self.fitnessvalue}, {self._gene_array})'
     
+    def __eq__(self, other):
+        if isinstance(other, Genotype):
+            return self._gene_array == other._gene_array
+        else:
+            raise ValueError(f"cant equate Genotype to {type(other)}")
+    
 class Population:
     def __init__(self, population_array):
         if not ((all(isinstance(genotype, Genotype) for genotype in population_array)) or (len(population_array) == 0)) :
             raise ValueError("population_array should be a an empty list or contain Geneotype objects")
         self.population_array = population_array
-
-    def append_genotype(self, genotype):
-        if not isinstance(genotype, Genotype):
-            raise ValueError(f"Only elements of type genotype can be appended to population_array, got {type(genotype)}")
-        self.population_array.append(genotype)
 
     def __str__(self):
         return f'Population(size: {len(self.population_array)}, first 10 genotypes: {self.population_array[0:10]})'
@@ -165,6 +183,8 @@ class Population:
     
 class CurrentResources:
     def __init__(self, resource_array):
+        if not ((all(isinstance(node, Node) for node in resource_array)) or (len(resource_array) == 0)) :
+            raise ValueError("resource_array should be a an empty list or contain Node objects")
         self.resource_array = resource_array
 
     def __str__(self):
@@ -174,7 +194,9 @@ class CurrentResources:
 
 class CurrentTaskqueue:
     def __init__(self, task_array):
-        self.resource_array = task_array
+        if not ((all(isinstance(task, Task) for task in task_array)) or (len(task_array) == 0)) :
+            raise ValueError("task_array should be a an empty list or contain Task objects")
+        self.task_array = task_array
 
     def __str__(self):
         return f'current_resources(size: {len(self.resource_array)}, list of nodes: {self.resource_array})'
@@ -183,12 +205,20 @@ class CurrentTaskqueue:
 
 class Node:
     def __init__(self,id):
+        if not(isinstance(id, int) and id >= 0):
+            raise ValueError(f"integer bigger or equal to 0 expected, got {id}")
         self.id = id
     
     def __str__(self):
-        return f'Node(id: {id})'
+        return f'Node(id: {self.id})'
     def __repr__(self):
-        return f'Node(id: {id})'
+        return f'Node(id: {self.id})'
+    
+    def __eq__(self, other):
+        if isinstance(other, Node):
+            return self.id == other.id
+        else:
+            raise ValueError(f"cant equate Node to {type(other)}")
 
 """
 gloabl variables
@@ -196,7 +226,7 @@ gloabl variables
 fairness_coef = 0.3
 local_coef = 0.7
 population = Population([])
-current_resources = Current_resources([])
+current_resources = CurrentResources([])
 
 
 """
@@ -217,7 +247,7 @@ def fairness(genotype):
 
     #this is dictonary with tenant id as key and array of size 2. idx0: sum of taskqueue positions idx1: number of tasks the tenant has pending
     current_tenant_ids = {}
-    for gene in genotype.gene_array:
+    for gene in genotype._gene_array:
         for task_queue_position in range(1,len(gene.tasksqueue)+1):
             if len(current_tenant_ids) == 0:
                 current_tenant_ids[gene.tasksqueue[task_queue_position - 1].tenant.id] = [task_queue_position, 1]
@@ -228,7 +258,6 @@ def fairness(genotype):
                 current_tenant_ids[gene.tasksqueue[task_queue_position- 1].tenant.id][1] = current_tenant_ids[gene.tasksqueue[task_queue_position- 1].tenant.id][1] + 1
 
     #mean squared error from mean taskqueue sum
-    #normalizing would require debilitating performance cuts so we dont
 
     #values tasknumber divided by sum of taskposition list of number between 0 and 1 1 is best
     normalized_fairness = list(map(lambda x: x[1]/x[0], current_tenant_ids.values()))
@@ -247,11 +276,9 @@ def locality(genotype):
     #this is dictonary with tenant id as key and array of size 3. idx0: number of tasks the tenant has pending, idx1: number of nodes they are scheduled on, idx2: the last resource a pedning task was encountered
     current_tenant_ids = {}
     gene_counter = 0
-    for gene in genotype.gene_array:
+    for gene in genotype._gene_array:
         for task_queue_position in range(len(gene.tasksqueue)):
-            if len(current_tenant_ids) == 0:
-                current_tenant_ids[gene.tasksqueue[task_queue_position].tenant.id] = [1, 1, gene_counter]
-            elif gene.tasksqueue[task_queue_position].tenant.id not in current_tenant_ids:
+            if len(current_tenant_ids) == 0 or gene.tasksqueue[task_queue_position].tenant.id not in current_tenant_ids:
                 current_tenant_ids[gene.tasksqueue[task_queue_position].tenant.id] = [1, 1, gene_counter]
             elif gene_counter >= current_tenant_ids[gene.tasksqueue[task_queue_position].tenant.id][2]:
                 current_tenant_ids[gene.tasksqueue[task_queue_position].tenant.id][0] = current_tenant_ids[gene.tasksqueue[task_queue_position].tenant.id][0] +1
@@ -306,13 +333,13 @@ def init(poolsize, inital_taks_queue):
 
 #iterate n times. N being equal to poolsize
     for i in range(poolsize):
-        genotype = Genotype([], 0)
+        genotype = Genotype([])
         for resource in current_resources.resource_array:
             gene = Gene(resource, [])
-            genotype.gene_array.append(gene)
+            genotype._gene_array.append(gene)
         for task in inital_taks_queue:
-            resource_id = randint(0, len(current_resources.resource_array) -1 )# including the last number so minus one for index
-            genotype.gene_array[resource_id].tasksqueue.append(task)
+            resource_id = random.randint(0, len(current_resources.resource_array) -1 )# including the last number so minus one for index
+            genotype._gene_array[resource_id].tasksqueue.append(task)
         pool.append(genotype)
         fitness_eval(pool)
     return pool
@@ -328,8 +355,10 @@ description:
     the input shoudl just be the children and we do the rest when calling the function
 """
 def selection(n, to_select):
-    if n > len(arr):
+    if n > len(to_select):
         return "Error: n is greater than the size of the array."
+    if n == len(to_select):
+        return to_select
     
     """utility functions start ------------------------------------------"""
     #standard quicksort adaption where we sort till we find the exact pivot that is the nth element from the top
@@ -373,7 +402,8 @@ def selection(n, to_select):
 input:  
     - n_parents (int): is the number of parents returned
     - k(int): how many parents are considered for each tournament increase this to increase the
-    selection pressure
+    selection pressure, has to be less than n parents otherwise it is always the top one
+    and if k ==1 it is random
 output: 
     - a set of parents to be taken for crossover
 description:
@@ -382,10 +412,13 @@ description:
 def parent_selection(n_parents, k, population):
     if not isinstance(n_parents, int) or not isinstance(k, int):
         raise TypeError("parent selection called with wrong parameter type")
+    if k >= len(population) or k<1 :
+        raise ValueError(f"parent selection called with k that is bigger or equal to the size of the canidate pool or with k smaller to one got {k}")
 
     mating_pool = []
     
     for _ in range(n_parents):
+        #random.sample is without replacement which is what we want random.choice is with
         potential_mates = random.sample(population, k)
         best_mate = max(potential_mates, key=lambda mate: mate.fitnessvalue)
         mating_pool.append(best_mate)
@@ -395,9 +428,9 @@ def parent_selection(n_parents, k, population):
 
 
 # BEGIN
-# /* Assume we wish to select λ members of a pool of μ individuals */
+# /* Assume we wish to select lamda members of a pool of mu individuals */
 # set current member = 1;
-# WHILE ( current member ≤ λ ) DO
+# WHILE ( current member ≤ lamda ) DO
 # Pick k individuals randomly, with or without replacement;
 # Compare these k individuals and select the best of them;
 # Denote this individual as i;
@@ -436,52 +469,65 @@ def partially_mapped_crossover(parent1, parent2, k=1):
     if type(k) is not int:
         raise TypeError("k_point_crossover called with wrong parameter type")
     
-    if not len(parent1.gene_array) == len(parent2.gene_array):
+    if not len(parent1._gene_array) == len(parent2._gene_array):
         raise Exception("k_point_crossover called with two parents of different length")
     
     child = Genotype([])
-    for index in range(len(parent1.gene_array)):
-        child.gene_array.append(Gene("placeholder",[]))
     
     leftover_tasks = []
     # one more than number of tasks in total because id start at one and constant arithmatic is more wasterful then simply having one more unused bit
     bm = BitMap(9)
     gene_idx = 0
-    while gene_idx < len(child.gene_array):
+    while gene_idx < len(parent1._gene_array):
+        #in case there are no tasks in the taskqueue for the resource
+        if len(parent1._gene_array[gene_idx].tasksqueue) == 0:
+            #have to clean up and continue to next gene
+            cleanup_idx = 0
+            cleanup_taks = parent2._gene_array[gene_idx].tasksqueue
+            while cleanup_idx < len(cleanup_taks):
+                if not bm.test(cleanup_taks[cleanup_idx].id):
+                    leftover_tasks.append(cleanup_taks[cleanup_idx])
+                cleanup_idx = cleanup_idx +1
+
+
         temp = k
         while True:  
-            n_tasks_per_chunk = math.floor(len(parent1.gene_array[gene_idx].tasksqueue) / (temp+1))
+            n_tasks_per_chunk = math.floor(len(parent1._gene_array[gene_idx].tasksqueue) / (temp+1))
             if n_tasks_per_chunk == 0:
                 temp = temp-1
+                if temp == 0:
+                    #there is only one task
+                    n_tasks_per_chunk = 1
+                    break
             else:
                 break
 
-        child.gene_array[gene_idx].resource = parent1.gene_array[gene_idx].resource
+        child._gene_array.append(Gene(parent1._gene_array[gene_idx].resource,[]))
 
         #the taskqueue size is taken from one parent
-        for i in range(len(parent1.gene_array[gene_idx].tasksqueue)):
-            child.gene_array[gene_idx].tasksqueue.append(0)
+        for i in range(len(parent1._gene_array[gene_idx].tasksqueue)):
+            child._gene_array[gene_idx].tasksqueue.append(0)
 
         child_task_idx = 0
         chosen_idx = 0
         other_idx = 0
-        coin = randint(0,1)
+        coin = random.randint(0,1)
         if coin:
-            chosen_parent_tasks = parent1.gene_array[gene_idx].tasksqueue
-            other_parent_tasks = parent2.gene_array[gene_idx].tasksqueue
+            chosen_parent_tasks = parent1._gene_array[gene_idx].tasksqueue
+            other_parent_tasks = parent2._gene_array[gene_idx].tasksqueue
         else:
-            chosen_parent_tasks = parent2.gene_array[gene_idx].tasksqueue
-            other_parent_tasks = parent1.gene_array[gene_idx].tasksqueue
+            chosen_parent_tasks = parent2._gene_array[gene_idx].tasksqueue
+            other_parent_tasks = parent1._gene_array[gene_idx].tasksqueue
 
 
-        while child_task_idx <  len(child.gene_array[gene_idx].tasksqueue):
+        while child_task_idx <  len(child._gene_array[gene_idx].tasksqueue):
 
             task_taken = False
             
             if child_task_idx < n_tasks_per_chunk:
                 while not task_taken and chosen_idx < len(chosen_parent_tasks):
                     if not bm.test(chosen_parent_tasks[chosen_idx].id):
-                        child.gene_array[gene_idx].tasksqueue[child_task_idx] = chosen_parent_tasks[chosen_idx]
+                        child._gene_array[gene_idx].tasksqueue[child_task_idx] = chosen_parent_tasks[chosen_idx]
                         bm.set(chosen_parent_tasks[chosen_idx].id)
                         task_taken = True
                         chosen_idx = chosen_idx +1
@@ -491,7 +537,7 @@ def partially_mapped_crossover(parent1, parent2, k=1):
 
                 while not task_taken and other_idx < len(other_parent_tasks):
                     if not bm.test(other_parent_tasks[other_idx].id):
-                        child.gene_array[gene_idx].tasksqueue[child_task_idx] = other_parent_tasks[other_idx]
+                        child._gene_array[gene_idx].tasksqueue[child_task_idx] = other_parent_tasks[other_idx]
                         bm.set(other_parent_tasks[other_idx].id)
                         task_taken = True
                         other_idx = other_idx +1
@@ -501,7 +547,7 @@ def partially_mapped_crossover(parent1, parent2, k=1):
             else:
                 while not task_taken and other_idx < len(other_parent_tasks):
                     if not bm.test(other_parent_tasks[other_idx].id):
-                        child.gene_array[gene_idx].tasksqueue[child_task_idx] = other_parent_tasks[other_idx]
+                        child._gene_array[gene_idx].tasksqueue[child_task_idx] = other_parent_tasks[other_idx]
                         bm.set(other_parent_tasks[other_idx].id)
                         task_taken = True
                         other_idx = other_idx +1
@@ -511,7 +557,7 @@ def partially_mapped_crossover(parent1, parent2, k=1):
                 
                 while not task_taken and chosen_idx < len(chosen_parent_tasks):
                     if not bm.test(chosen_parent_tasks[chosen_idx].id):
-                        child.gene_array[gene_idx].tasksqueue[child_task_idx] = chosen_parent_tasks[chosen_idx]
+                        child._gene_array[gene_idx].tasksqueue[child_task_idx] = chosen_parent_tasks[chosen_idx]
                         bm.set(chosen_parent_tasks[chosen_idx].id)
                         task_taken = True
                         chosen_idx = chosen_idx +1
@@ -521,7 +567,7 @@ def partially_mapped_crossover(parent1, parent2, k=1):
             if not task_taken:
                 for task_idx in range(len(leftover_tasks)-1):
                     if not bm.test(leftover_tasks[task_idx].id):
-                        child.gene_array[gene_idx].tasksqueue[child_task_idx] = leftover_tasks[task_idx]
+                        child._gene_array[gene_idx].tasksqueue[child_task_idx] = leftover_tasks[task_idx]
                         leftover_tasks.pop(task_idx)
                         bm.set(leftover_tasks[task_idx].id)
                         task_taken = True
@@ -560,19 +606,19 @@ def mutation(input_array, mutation_coefficient1):#, mutation_coefficient2, mutat
     if not isinstance(input_array[0], Genotype):
         raise TypeError("init called with wrong parameter type")
     for genotype in input_array:
-        for gene in genotype.gene_array:
+        for gene in genotype._gene_array:
             if random() <= mutation_coefficient1 and len(gene.tasksqueue) != 0:
                 #need to switch one task of the current gene with another task of a random gene
-                switch_gene_other_idx = choice(range(len(genotype.gene_array)))
-                switch_gene_taskqueue_len = len(genotype.gene_array[switch_gene_other_idx].tasksqueue)
+                switch_gene_other_idx = random.choice(range(len(genotype._gene_array)))
+                switch_gene_taskqueue_len = len(genotype._gene_array[switch_gene_other_idx].tasksqueue)
                 if switch_gene_taskqueue_len == 0:
                     continue
-                switch_task_other_idx = choice(range(switch_gene_taskqueue_len))
-                switch_task_this_idx = choice(range(len(gene.tasksqueue)))
+                switch_task_other_idx = random.choice(range(switch_gene_taskqueue_len))
+                switch_task_this_idx = random.choice(range(len(gene.tasksqueue)))
 
 
-                switch_temp = genotype.gene_array[switch_gene_other_idx].tasksqueue[switch_task_other_idx]
-                genotype.gene_array[switch_gene_other_idx].tasksqueue[switch_task_other_idx] = gene.tasksqueue[switch_task_this_idx]
+                switch_temp = genotype._gene_array[switch_gene_other_idx].tasksqueue[switch_task_other_idx]
+                genotype._gene_array[switch_gene_other_idx].tasksqueue[switch_task_other_idx] = gene.tasksqueue[switch_task_this_idx]
                 gene.tasksqueue[switch_task_this_idx] = switch_temp
 
 """Ingress"""

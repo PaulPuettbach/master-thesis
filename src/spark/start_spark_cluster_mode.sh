@@ -1,5 +1,4 @@
 #!/bin/bash
-
 #./spark-3.5.0-bin-hadoop3/bin/docker-image-tool.sh -r docker.io/paulpuettbach/spark_image -t latest -p ./kubernetes/dockerfiles/spark/bindings/python/Dockerfile build
 #--conf spark.kubernetes.scheduler.name=spark-scheduler
 
