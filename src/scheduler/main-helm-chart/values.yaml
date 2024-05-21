@@ -4,6 +4,8 @@
 
 replicaCount: 1
 
+namespace: kube-system
+
 main_component:
   service:
     name: -main-service
@@ -12,6 +14,9 @@ main_component:
     pullPolicy: Never
     # Overrides the image tag whose default is the chart version.
     tag: latest
+  labels:
+    component: scheduler
+    tier: control-plane
 
 
 daemon:
@@ -29,12 +34,13 @@ fullnameOverride: ""
 
 serviceAccount:
   # Specifies whether a service account should be created
-  create: false
+  create: true
 #   # Annotations to add to the service account
 #   annotations: {}
 #   # The name of the service account to use.
 #   # If not set and create is true, a name is generated using the fullname template
-#   name: ""
+  name: ea-scheduler
+
 
 podAnnotations: {}
 

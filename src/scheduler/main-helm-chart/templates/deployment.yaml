@@ -2,8 +2,12 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ include "main-helm-chart.fullname" . }}
+  namespace: {{ .Values.namespace }}
   labels:
     {{- include "main-helm-chart.labels" . | nindent 4 }}
+    {{- range $key, $val := .Values.main_component.labels }}
+    {{ $key }}: {{ $val}}
+    {{- end }}
 spec:
 {{- if not .Values.autoscaling.enabled }}
   replicas: {{ .Values.replicaCount }}
@@ -11,6 +15,9 @@ spec:
   selector:
     matchLabels:
       {{- include "main-helm-chart.selectorLabels" . | nindent 6 }}
+      {{- range $key, $val := .Values.main_component.labels }}
+      {{ $key }}: {{ $val}}
+      {{- end }}
   template:
     metadata:
     {{- with .Values.podAnnotations }}
@@ -19,6 +26,9 @@ spec:
     {{- end }}
       labels:
         {{- include "main-helm-chart.selectorLabels" . | nindent 8 }}
+        {{- range $key, $val := .Values.main_component.labels }}
+        {{ $key }}: {{ $val}}
+        {{- end }}
     spec:
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
@@ -38,20 +48,15 @@ spec:
           env:
           - name: DAEMON-SERVICE
             value: {{ include "main-helm-chart.fullname" . }}{{ .Values.daemon.service.name }}
+          - name: DAEMON-SERVICE-PORT
+            value: {{ .Values.service.port  | quote}}
           ports:
             - name: http
               containerPort: 80
               protocol: TCP
-          livenessProbe:
-            httpGet:
-              path: /
-              port: http
-          readinessProbe:
-            httpGet:
-              path: /
-              port: http
-          resources:
-            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+          - name: config-volume
+            mountPath: /etc/kubernetes/my-scheduler
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
@@ -64,3 +69,7 @@ spec:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      volumes:
+        - name: config-volume
+          configMap:
+            name: my-scheduler-config

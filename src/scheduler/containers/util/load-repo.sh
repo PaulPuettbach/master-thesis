@@ -1,8 +1,8 @@
 #!/bin/bash
 #build the container image for the main component
-cd ../main-component
+cd ../main-component/scheduling_decision
 docker build -t main-component .
-cd ..
+cd ../..
 
 #built the container image that is going to run on the daemonset
 cd daemon

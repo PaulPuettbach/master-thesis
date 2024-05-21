@@ -2,6 +2,7 @@ from flask import Flask, request
 import math
 import random
 from bitmap import BitMap
+from threading import Thread
 
 """
 fairness based on queue are all tenants getting teh same resources
@@ -57,6 +58,19 @@ i would argue we dont even need to exchange the individuals because the problem 
 """Init"""
 #get the initalwokqueue
 
+"""Ingress"""
+app = Flask(__name__)
+
+#-----this is from the main scheduler-----#
+#get updates of workqueue from the main scheduler
+@app.route('/workqueue', methods=['POST'])
+def workqueue():
+    print("update from main scheduler to the workqueue")
+
+# # get updates on own resource utilization to change pool size
+# @app.route('/change_pool', methods=['POST'])
+# def node_status():
+#     print("update from main scheduler to the pool")
 
 """Logic"""
 class Tenant:
@@ -620,18 +634,9 @@ def mutation(input_array, mutation_coefficient1):#, mutation_coefficient2, mutat
                 switch_temp = genotype._gene_array[switch_gene_other_idx].tasksqueue[switch_task_other_idx]
                 genotype._gene_array[switch_gene_other_idx].tasksqueue[switch_task_other_idx] = gene.tasksqueue[switch_task_this_idx]
                 gene.tasksqueue[switch_task_this_idx] = switch_temp
+                    
 
-"""Ingress"""
-app = Flask(__name__)
-
-#-----this is from the main scheduler-----#
-#get updates of workqueue from the main scheduler
-@app.route('/workqueue', methods=['POST'])
-def workqueue():
-    print("update from main scheduler to the workqueue")
-
-# # get updates on own resource utilization to change pool size
-# @app.route('/change_pool', methods=['POST'])
-# def node_status():
-#     print("update from main scheduler to the pool")
+if __name__ == '__main__':
+    flask_thread = Thread(target=app.run, kwargs={'host': '0.0.0.0'})
+    flask_thread.start()
 """Egress""" 
