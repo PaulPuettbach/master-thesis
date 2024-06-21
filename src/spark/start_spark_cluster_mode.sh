@@ -31,6 +31,7 @@ mvn package -DskipTests -Dmaven.test.skip=true
     --name shortest-path \
     --conf spark.kubernetes.namespace=spark-namespace \
     --conf spark.executor.instances=5 \
+    --conf spark.kubernetes.scheduler.name=custom-scheduler \
     --conf spark.kubernetes.authenticate.driver.serviceAccountName=spark \
     --conf spark.kubernetes.container.image=docker.io/paulpuettbach/spark_image/spark:test \
     local:///opt/spark/benchmark/my-spark-project-1.0.jar

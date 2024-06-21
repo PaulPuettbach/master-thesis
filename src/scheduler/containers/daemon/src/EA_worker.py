@@ -63,8 +63,13 @@ app = Flask(__name__)
 
 #-----this is from the main scheduler-----#
 #get updates of workqueue from the main scheduler
-@app.route('/workqueue', methods=['POST'])
-def workqueue():
+@app.route('/test', methods=['GET'])
+def test():
+    return 'hello world'
+
+@app.route('/init', methods=['POST'])
+def init_request():
+    print(f"this is the json {request.json}")
     print("update from main scheduler to the workqueue")
 
 # # get updates on own resource utilization to change pool size
@@ -637,6 +642,6 @@ def mutation(input_array, mutation_coefficient1):#, mutation_coefficient2, mutat
                     
 
 if __name__ == '__main__':
-    flask_thread = Thread(target=app.run, kwargs={'host': '0.0.0.0'})
+    flask_thread = Thread(target=app.run, kwargs={'host': '0.0.0.0' , 'port': '80'})
     flask_thread.start()
 """Egress""" 
