@@ -42,6 +42,17 @@ spec:
             - name: http
               containerPort: 80
               protocol: TCP
+      initContainers:
+        - name: init-main-service
+          image: busybox:1.28
+          command:
+            - sh
+            - -c
+            - >
+              until nslookup {{ include "main-helm-chart.fullname" . }}{{ .Values.main_component.service.name }};
+              do echo waiting for {{ include "main-helm-chart.fullname" . }}{{ .Values.main_component.service.name }};
+              sleep 2;
+              done
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

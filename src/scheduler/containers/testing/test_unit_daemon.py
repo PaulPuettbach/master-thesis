@@ -7,41 +7,45 @@ class TestInstantiation:
         with pytest.raises(ValueError):
             #positive id
             invalid = Tenant(-2)
-        valid1 = Tenant(0)
+        valid1 = Tenant("paul")
         assert valid1.id == 0
-        valid2 = Tenant(1)
+        valid2 = Tenant("peter")
         assert valid2.id == 1
+        valid2 = Tenant("frank")
+        assert valid2.id == 2
+        valid3 = Tenant("paul")
+        assert valid3.id == 0
 
     def test_task(self):
         with pytest.raises(ValueError):
             # id should be positive integer
-            invalid = Task(-2, "Pending",Tenant(0))
+            invalid = Task(-2, "Pending",Tenant("paul"))
         with pytest.raises(ValueError):
             # status has to be one of the allowed strings
-            invalid2 = Task(0, "something",Tenant(0))
+            invalid2 = Task(0, "something",Tenant("paul"))
         with pytest.raises(ValueError):
             invalid3 = Task(0, "Pending",0)
         with pytest.raises(ValueError):
-            invalid4 = Task(0, "Pending",Tenant(0),"something")
+            invalid4 = Task(0, "Pending",Tenant("paul"),"something")
         with pytest.raises(ValueError):
-            invalid5 = Task(0, "Pending",Tenant(0),True)
+            invalid5 = Task(0, "Pending",Tenant("paul"),True)
         with pytest.raises(ValueError):
-            invalid6 = Task(0, "Pending",Tenant(0),False, Node(1))
-        valid = Task(0, "Pending",Tenant(0), True, Node(1))
-        valid2 = Task(0, "Schedule",Tenant(0))
-        valid3 = Task(0, "Finished",Tenant(0), False, None)
+            invalid6 = Task(0, "Pending",Tenant("paul"),False, Node(1))
+        valid = Task(0, "Pending",Tenant("paul"), True, Node(1))
+        valid2 = Task(0, "Schedule",Tenant("paul"))
+        valid3 = Task(0, "Finished",Tenant("paul"), False, None)
 
     def test_gene(self):
         valid = Gene(Node(1), [])
-        valid2 = Gene(Node(1), [Task(0, "Pending",Tenant(0), True, Node(1)), Task(0, "Schedule",Tenant(0))])
+        valid2 = Gene(Node(1), [Task(0, "Pending",Tenant("paul"), True, Node(1)), Task(0, "Schedule",Tenant("paul"))])
         with pytest.raises(ValueError):
-            invalid = Gene(Task(0, "Finished",Tenant(0), False, None), [])
+            invalid = Gene(Task(0, "Finished",Tenant("paul"), False, None), [])
         with pytest.raises(ValueError):
-            invalid2 = Gene(Node(0), [Task(0, "Schedule",Tenant(0)),Task(1, "Schedule",Tenant(2)), Node(9)])
+            invalid2 = Gene(Node(0), [Task(0, "Schedule",Tenant("paul")),Task(1, "Schedule",Tenant("peter")), Node(9)])
     
     def test_geneotype(self):
         gene1 = Gene(Node(1), [])
-        gene2 = Gene(Node(1), [Task(0, "Pending",Tenant(0), True, Node(1)), Task(1, "Schedule",Tenant(0))])
+        gene2 = Gene(Node(1), [Task(0, "Pending",Tenant("paul"), True, Node(1)), Task(1, "Schedule",Tenant("paul"))])
         valid = Genotype([])
         valid2 = Genotype([gene1,gene2])
         valid3 = Genotype([], 1.0)
@@ -56,13 +60,13 @@ class TestInstantiation:
             invalid3 = Genotype([gene1,gene2], 15.0)
         with pytest.raises(ValueError):
             #cant append task with the same id
-            valid2.append_task(Task(1, "Schedule",Tenant(0)), Node(1))
+            valid2.append_task(Task(1, "Schedule",Tenant("paul")), Node(1))
 
-        valid2.append_task(Task(2, "Schedule",Tenant(0)), Node(1))
+        valid2.append_task(Task(2, "Schedule",Tenant("paul")), Node(1))
     
     def test_population(self):
         gene1 = Gene(Node(1), [])
-        gene2 = Gene(Node(1), [Task(0, "Pending",Tenant(0), True, Node(1)), Task(1, "Schedule",Tenant(0))])
+        gene2 = Gene(Node(1), [Task(0, "Pending",Tenant("paul"), True, Node(1)), Task(1, "Schedule",Tenant("paul"))])
         individual1 = Genotype([])
         individual2 = Genotype([gene1,gene2])
         individual3 = Genotype([], 1.0)
@@ -75,13 +79,13 @@ class TestInstantiation:
         valid1 = CurrentResources([Node(0), Node(1)])
         valid2 = CurrentResources([])
         with pytest.raises(ValueError):
-            invalid1 = CurrentResources([Gene(Node(1), []), Gene(Node(1), [Task(0, "Pending",Tenant(0), True, Node(1)), Task(1, "Schedule",Tenant(0))])])
+            invalid1 = CurrentResources([Gene(Node(1), []), Gene(Node(1), [Task(0, "Pending",Tenant("paul"), True, Node(1)), Task(1, "Schedule",Tenant("paul"))])])
 
     def test_currenttaskqueue(self):
-        valid1 = CurrentTaskqueue([Task(0, "Schedule",Tenant(0)), Task(1, "Pending",Tenant(0))])
+        valid1 = CurrentTaskqueue([Task(0, "Schedule",Tenant("paul")), Task(1, "Pending",Tenant("paul"))])
         valid2 = CurrentTaskqueue([])
         with pytest.raises(ValueError):
-            invalid1 = CurrentResources([Gene(Node(1), []), Gene(Node(1), [Task(0, "Pending",Tenant(0), True, Node(1)), Task(1, "Schedule",Tenant(0))])])
+            invalid1 = CurrentResources([Gene(Node(1), []), Gene(Node(1), [Task(0, "Pending",Tenant("paul"), True, Node(1)), Task(1, "Schedule",Tenant("paul"))])])
 
     def test_node(self):
         valid1 = Node(0)
@@ -93,9 +97,9 @@ class TestInstantiation:
 
 class TestEq:
     def test_tenant_eq(self):
-        tenant1 = Tenant(0)
-        tenant2 = Tenant(0)
-        tenant3 = Tenant(1)
+        tenant1 = Tenant("paul")
+        tenant2 = Tenant("paul")
+        tenant3 = Tenant("peter")
         nottenant = Node(1)
 
         assert(tenant1 == tenant2)
@@ -104,9 +108,9 @@ class TestEq:
             tenant1 == nottenant
 
     def test_task_eq(self):
-        task1 = Task(0, "Pending",Tenant(0), True, Node(1))
-        task2 = Task(0, "Schedule",Tenant(0))
-        task3 = Task(1, "Finished",Tenant(0), False, None)
+        task1 = Task(0, "Pending",Tenant("paul"), True, Node(1))
+        task2 = Task(0, "Schedule",Tenant("paul"))
+        task3 = Task(1, "Finished",Tenant("paul"), False, None)
         nottask = Node(1)
 
         assert(task1 == task2)
@@ -115,8 +119,8 @@ class TestEq:
             task1 == nottask
     
     def test_gene_eq(self):
-        tenant1 = Tenant(0)
-        tenant3 = Tenant(2)
+        tenant1 = Tenant("paul")
+        tenant3 = Tenant("max")
         gene1 = Gene(Node(1), [Task(0, "Pending",tenant1), Task(1, "Schedule",tenant1)])
         gene2 = Gene(Node(1), [Task(1, "Schedule",tenant1), Task(0, "Pending",tenant1)])
         gene3 = Gene(Node(1), [Task(0, "Pending",tenant1), Task(1, "Schedule",tenant1)])
@@ -127,9 +131,9 @@ class TestEq:
             gene1 ==tenant3
 
     def test_geneotype_eq(self):
-        tenant1 = Tenant(0)
-        tenant2 = Tenant(1)
-        tenant3 = Tenant(2)
+        tenant1 = Tenant("paul")
+        tenant2 = Tenant("peter")
+        tenant3 = Tenant("max")
         gene1 = Gene(Node(1), [Task(0, "Pending",tenant1), Task(1, "Schedule",tenant1)])
         gene2 = Gene(Node(2), [Task(4, "Pending",tenant3), Task(6, "Schedule",tenant2), Task(2, "Schedule",tenant1)])
         gene3 = Gene(Node(3), [Task(7, "Pending",tenant2), Task(3, "Schedule",tenant1), Task(8, "Schedule",tenant3)])
@@ -152,9 +156,9 @@ class TestEq:
 class Testfitness:
     def test_fairness(self):
         # the idea for this test is simple do the calculation by hand for what it should be and see if we get the same
-        tenant1 = Tenant(0)
-        tenant2 = Tenant(1)
-        tenant3 = Tenant(2)
+        tenant1 = Tenant("paul")
+        tenant2 = Tenant("peter")
+        tenant3 = Tenant("max")
         gene1 = Gene(Node(1), [Task(0, "Pending",tenant1), Task(1, "Schedule",tenant1)])
         gene2 = Gene(Node(2), [Task(4, "Pending",tenant3), Task(6, "Schedule",tenant2), Task(2, "Schedule",tenant1)])
         gene3 = Gene(Node(3), [Task(7, "Pending",tenant2), Task(3, "Schedule",tenant1), Task(8, "Schedule",tenant3)])
@@ -182,9 +186,9 @@ class Testfitness:
         assert fairness(fairtest) == 1.0
     
     def test_locality(self):
-        tenant1 = Tenant(0)
-        tenant2 = Tenant(1)
-        tenant3 = Tenant(2)
+        tenant1 = Tenant("paul")
+        tenant2 = Tenant("peter")
+        tenant3 = Tenant("max")
         gene1 = Gene(Node(1), [Task(0, "Pending",tenant1), Task(1, "Schedule",tenant1)])
         gene2 = Gene(Node(2), [Task(4, "Pending",tenant3), Task(6, "Schedule",tenant2), Task(2, "Schedule",tenant1)])
         gene3 = Gene(Node(3), [Task(7, "Pending",tenant2), Task(3, "Schedule",tenant1), Task(8, "Schedule",tenant3)])
@@ -200,9 +204,9 @@ class Testfitness:
 class TestInit:
     def test_init(self):
         current_resources.resource_array.extend([Node(0), Node(1), Node(2)])
-        tenant1 = Tenant(0)
-        tenant2 = Tenant(1)
-        tenant3 = Tenant(2)
+        tenant1 = Tenant("paul")
+        tenant2 = Tenant("peter")
+        tenant3 = Tenant("max")
         poolsize = 10
         test = init(poolsize, [Task(0, "Pending",tenant1),Task(1, "Schedule",tenant1), Task(2, "Schedule",tenant1),\
                          Task(3, "Schedule",tenant1),Task(4, "Pending",tenant3),Task(5, "Schedule",tenant2),\
@@ -274,9 +278,9 @@ class TestParticallyMappedCrossover:
         #number of tasks per node is from one parent
         #decide crossover point before that take from one parent after that
         #take from the other parent
-        tenant1 = Tenant(0)
-        tenant2 = Tenant(1)
-        tenant3 = Tenant(2)
+        tenant1 = Tenant("paul")
+        tenant2 = Tenant("peter")
+        tenant3 = Tenant("max")
         gene1 = Gene(Node(1), [Task(0, "Pending",tenant1), Task(1, "Schedule",tenant1)])
         gene2 = Gene(Node(2), [Task(4, "Pending",tenant3), Task(6, "Schedule",tenant2), Task(2, "Schedule",tenant1)])
         gene3 = Gene(Node(3), [Task(7, "Pending",tenant2), Task(3, "Schedule",tenant1), Task(5, "Schedule",tenant3)])
@@ -323,9 +327,9 @@ class TestParticallyMappedCrossover:
         assert(test._gene_array[2].tasksqueue[2].id == 5)
 
     def test_partially_mapped_crossover_edge_case_1(self):
-        tenant1 = Tenant(0)
-        tenant2 = Tenant(1)
-        tenant3 = Tenant(2)
+        tenant1 = Tenant("paul")
+        tenant2 = Tenant("peter")
+        tenant3 = Tenant("max")
         gene1 = Gene(Node(1), [])
         gene2 = Gene(Node(2), [Task(0, "Pending",tenant1), Task(4, "Pending",tenant3), Task(6, "Schedule",tenant2), Task(2, "Schedule",tenant1)])
         gene3 = Gene(Node(3), [Task(1, "Schedule",tenant1), Task(7, "Pending",tenant2), Task(3, "Schedule",tenant1), Task(5, "Schedule",tenant3)])

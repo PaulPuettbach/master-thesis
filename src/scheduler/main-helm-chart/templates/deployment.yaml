@@ -57,6 +57,17 @@ spec:
           volumeMounts:
           - name: config-volume
             mountPath: /etc/kubernetes/my-scheduler
+      initContainers:
+        - name: init-daemon-service
+          image: busybox:1.28
+          command:
+            - sh
+            - -c
+            - >
+              until nslookup {{ include "main-helm-chart.fullname" . }}{{ .Values.daemon.service.name }};
+              do echo waiting for{{ include "main-helm-chart.fullname" . }}{{ .Values.daemon.service.name }};
+              sleep 2;
+              done
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

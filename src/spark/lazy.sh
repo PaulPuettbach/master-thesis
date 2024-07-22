@@ -1,5 +1,4 @@
 #!/bin/bash
-helm uninstall scheduler
 ./cleanup.sh
 
 cd ../scheduler/containers/util
@@ -24,5 +23,7 @@ kubectl apply -f service.account.yaml
     --conf spark.kubernetes.container.image=docker.io/paulpuettbach/spark_image/spark:test \
     local:///opt/spark/benchmark/my-spark-project-1.0.jar
 
-
-kubectl get pods -n kube-system
+echo "-----------------------------------------------------------"
+kubectl logs $(kubectl get pods --no-headers -o custom-columns=":metadata.name" -n kube-system | grep '^scheduler' | grep -v 'scheduler-daemon') -n kube-system
+echo "-----------------------------------------------------------"
+kubectl logs $(kubectl get pods --no-headers -o custom-columns=":metadata.name" -n kube-system | grep 'scheduler-daemon') -n kube-system

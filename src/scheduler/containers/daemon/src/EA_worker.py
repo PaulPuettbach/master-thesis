@@ -1,8 +1,10 @@
 from flask import Flask, request
 import math
 import random
+import time
 from bitmap import BitMap
-from threading import Thread
+from threading import Thread, Lock
+from queue import Queue
 
 """
 fairness based on queue are all tenants getting teh same resources
@@ -53,47 +55,44 @@ lambda amount of children and mue number of parents
 notes from book
 we have a multimodal problem and we dont want a genetic drift
 i would argue we dont even need to exchange the individuals because the problem definition changes somewhat often anyway
+
+
+
 """
 
+
+
 """Init"""
-#get the initalwokqueue
 
-"""Ingress"""
-app = Flask(__name__)
-
-#-----this is from the main scheduler-----#
-#get updates of workqueue from the main scheduler
-@app.route('/test', methods=['GET'])
-def test():
-    return 'hello world'
-
-@app.route('/init', methods=['POST'])
-def init_request():
-    print(f"this is the json {request.json}")
-    print("update from main scheduler to the workqueue")
-
-# # get updates on own resource utilization to change pool size
-# @app.route('/change_pool', methods=['POST'])
-# def node_status():
-#     print("update from main scheduler to the pool")
 
 """Logic"""
 class Tenant:
-    def __init__(self,id):
-        if not(isinstance(id, int) and id >= 0):
-            raise ValueError(f"integer bigger or equal to 0 expected, got {id}")
-        self.id = id
+
+    __tenant_dict = {}
+    __id_counter = -1
+    def __init__(self,name):
+        if not(isinstance(name, str)):
+            raise ValueError(f"name str expected, got {name} with type {type(name)}")
+        self.name = name
+        self.id = self.__find_id()
     
     def __str__(self):
-        return f'tenant({self.id})'
+        return f'tenant({self.id}:{self.name})'
     
     def __repr__(self): 
-        return f'tenant({self.id})'
+        return f'tenant({self.id}:{self.name})'
     def __eq__(self, other):
         if isinstance(other, Tenant):
             return self.id == other.id
         else:
             raise ValueError(f"cant equate tenant to {type(other)}")
+    def __find_id(self):
+        if self.name in Tenant.__tenant_dict:
+            return Tenant.__tenant_dict[self.name]
+        else:
+            Tenant.__id_counter += 1
+            Tenant.__tenant_dict[self.name] = Tenant.__id_counter
+            return Tenant.__id_counter
     
 class Task:
     def __init__(self,id, status, tenant, migration=False, migrate_to=None):
@@ -101,13 +100,13 @@ class Task:
             raise ValueError(f"id as integer bigger or equal to 0 expected, got {id}")
         self.id = id
 
-        allowed_status = ["Pending", "Schedule", "Finished"]
+        allowed_status = ["Pending", "Scheduled", "Finished"]
         if not(isinstance(status, str) and status in allowed_status):
-            raise ValueError(f"status should be one of \"Pending\", \"Schedule\", \"Finished\" expected, got {status}")
+            raise ValueError(f"status should be one of \"Pending\", \"Scheduled\", \"Finished\" expected, got {status}")
         self.status = status
 
-        if not(isinstance(tenant, Tenant) and tenant.id >= 0):
-            raise ValueError(f"tenant should be integer bigger or equal to 0 expected, got {tenant}")
+        if not(isinstance(tenant, Tenant)):
+            raise ValueError(f"tenant instance expected, got object of type: {type(tenant)}")
         self.tenant = tenant
 
         if not isinstance(migration, bool):
@@ -211,17 +210,6 @@ class CurrentResources:
     def __repr__(self):
         return f'current_resources(size: {len(self.resource_array)}, list of nodes: {self.resource_array})'
 
-class CurrentTaskqueue:
-    def __init__(self, task_array):
-        if not ((all(isinstance(task, Task) for task in task_array)) or (len(task_array) == 0)) :
-            raise ValueError("task_array should be a an empty list or contain Task objects")
-        self.task_array = task_array
-
-    def __str__(self):
-        return f'current_resources(size: {len(self.resource_array)}, list of nodes: {self.resource_array})'
-    def __repr__(self):
-        return f'current_resources(size: {len(self.resource_array)}, list of nodes: {self.resource_array})'
-
 class Node:
     def __init__(self,id):
         if not(isinstance(id, int) and id >= 0):
@@ -240,12 +228,51 @@ class Node:
             raise ValueError(f"cant equate Node to {type(other)}")
 
 """
+Parameters
+"""
+#buffer time for batch processing
+buffer_time = 2
+#how many genotypes in population pool
+poolsize = 20
+#number of children since ew do mu lambda should be bigger than poolsize
+n_children = int(math.ceil(poolsize*1.5))
+#how much fairness counts in the fitness
+fairness_coef = 0.3
+#how much locality counts in the fitness
+local_coef = 0.7
+#number of parents for the parent selection
+n_parents = 5
+#k for the parent selection
+k = int(math.ceil(poolsize/5))
+#hwo many crossover points for the crossover
+k_point=1
+#see mutation for explenation
+mutation_coefficient1 = 0
+mutation_coefficient2 = 0
+mutation_coefficient3 = 0.3
+
+
+"""
 gloabl variables
 """
-fairness_coef = 0.3
-local_coef = 0.7
+# the whole population of the genotypes
 population = Population([])
+#a list of the resource nodes available
 current_resources = CurrentResources([])
+#a queue of the tasks that still need to be added to the genotype
+new_tasks = []
+#a array of all tasks that are unscheduled
+all_tasks = []
+# these two are for batch processing incoming tasks
+update_q = Queue()
+update_lock = Lock()
+# a lock for the epock
+epoch_lock = Lock()
+# weather the genotype task array is empty
+no_task = True
+#the best current fitnessvalue
+best_solution_fitness = 0
+
 
 
 """
@@ -323,7 +350,10 @@ def fitness_eval(to_eval):
     if not isinstance(to_eval[0], Genotype):
         raise TypeError("fitness eval called with wrong parameter type")
     for genotype in to_eval:
-        genotype.fitnessvalue = fairness_coef * fairness(genotype) + local_coef * locality(genotype)
+        fitness = fairness_coef * fairness(genotype) + local_coef * locality(genotype)
+        genotype.fitnessvalue = fitness
+        if fitness > best_solution_fitness:
+            pass
     
 
 #iterate n times. N being equal to poolsize
@@ -331,37 +361,49 @@ def fitness_eval(to_eval):
 
 """
 input:  
-    - poolsize (int) is the number of genotypes creates
-    - inital_taks_queue ([tasks]) the pending tasks at the time of the the init
+    - size (int) is the number of genotypes creates
 output: 
-    - an array of size poolsize of genotypes
+    - none
 constrains:
-    - the poolsize has to fit the resource the deamon is scheduled on
+    - the size has to fit the resource the deamon is scheduled on
 description:
     Initialize the pool of genotypes with randomized Genotypes
 """
-def init(poolsize, inital_taks_queue):
-    if type(poolsize) is not int:
+def init(size):
+    if type(size) is not int:
         raise TypeError("init called with wrong parameter type")
-    if not isinstance(inital_taks_queue[0], Task):
-        raise TypeError("init called with wrong parameter type")
-    if len(inital_taks_queue) < 1:
-        raise Exception("init called with empty task queue")
-    
-    pool = []
 
-#iterate n times. N being equal to poolsize
-    for i in range(poolsize):
+#iterate n times. N being equal to size
+    for i in range(size):
         genotype = Genotype([])
         for resource in current_resources.resource_array:
             gene = Gene(resource, [])
             genotype._gene_array.append(gene)
-        for task in inital_taks_queue:
+        population.population_array.append(genotype)
+
+"""
+input:  
+    - new_taks ([tasks]) the new pending tasks at the time of the the function call
+output: 
+    - nothing
+constrains:
+    - none
+description:
+    Add the new not yet considered pending tasks to the population
+"""
+def add_tasks_to_genotype(new_taks):
+    if not isinstance(new_taks[0], Task):
+        raise TypeError("add_tasks_to_genotype called with wrong parameter type")
+    if len(new_taks) < 1:
+        raise Exception("add_tasks_to_genotype called with empty task queue")
+    
+
+#iterate n times. N being equal to poolsize
+    for genotype in population.population_array:
+        for task in new_taks:
             resource_id = random.randint(0, len(current_resources.resource_array) -1 )# including the last number so minus one for index
             genotype._gene_array[resource_id].tasksqueue.append(task)
-        pool.append(genotype)
-        fitness_eval(pool)
-    return pool
+    no_task = False
 
 """
 input:  
@@ -428,7 +470,7 @@ output:
 description:
     find a number of parents acording to tournament selction the higher the k the higher the selection pressure
 """
-def parent_selection(n_parents, k, population):
+def parent_selection(population):
     if not isinstance(n_parents, int) or not isinstance(k, int):
         raise TypeError("parent selection called with wrong parameter type")
     if k >= len(population) or k<1 :
@@ -467,7 +509,7 @@ def parent_selection(n_parents, k, population):
 input:  
     - first parent (Genotype): the first parent for the crossover
     - second parent(Genotype): the second parent for the crossover
-    - k(int): number of crossoverpoints
+    - k_point(int): number of crossoverpoints
 output:
     - child (Genotype): a child that is a combination of the parents
 constrains:
@@ -481,11 +523,11 @@ description:
     by taking all the leftover tasks from both parents and adding them to the leftover tasks.
 
 """
-def partially_mapped_crossover(parent1, parent2, k=1):
+def partially_mapped_crossover(parent1, parent2):
     if not isinstance(parent1, Genotype) or not isinstance(parent2, Genotype):
         raise TypeError("k_point_crossover called with wrong parameter type")
     
-    if type(k) is not int:
+    if type(k_point) is not int:
         raise TypeError("k_point_crossover called with wrong parameter type")
     
     if not len(parent1._gene_array) == len(parent2._gene_array):
@@ -509,7 +551,7 @@ def partially_mapped_crossover(parent1, parent2, k=1):
                 cleanup_idx = cleanup_idx +1
 
 
-        temp = k
+        temp = k_point
         while True:  
             n_tasks_per_chunk = math.floor(len(parent1._gene_array[gene_idx].tasksqueue) / (temp+1))
             if n_tasks_per_chunk == 0:
@@ -610,8 +652,9 @@ def partially_mapped_crossover(parent1, parent2, k=1):
 """
 input:  
     - input_array([Genotype]): a list of all the Genotypes that need to be mutated
-    - mutation_coefficient1(float): between 0 and 1 mutation chance for each of the genes that random task is taken and added to another node
-    - mutation_coefficient2(float): between 0 and 1 mutation chance for an entire taskqueue to be appended to be swapped between nodes
+    - mutation_coefficient1(float): between 0 and 1 mutation chance for an entire taskqueue to be swapped between nodes
+    - mutation_coefficient2(float): between 0 and 1 mutation chance for each of the genes that random task is taken and added to another node
+    - mutation_coefficient3(float): between 0 and 1 mutation chance for each task to switch with another task on the same node
 output:
     - output_array([Genotype]): a list of all the now mutated Genotypes
 constrains:
@@ -621,27 +664,144 @@ description:
     resource node: important to note if the second chosen node does not have any resources no further attempts are made to find another node to save compution time
     this should be included in the determination of the mutation coefficient 
 """
-def mutation(input_array, mutation_coefficient1):#, mutation_coefficient2, mutation_coefficient3):
+def mutation(input_array):
     if not isinstance(input_array[0], Genotype):
         raise TypeError("init called with wrong parameter type")
     for genotype in input_array:
-        for gene in genotype._gene_array:
-            if random() <= mutation_coefficient1 and len(gene.tasksqueue) != 0:
-                #need to switch one task of the current gene with another task of a random gene
-                switch_gene_other_idx = random.choice(range(len(genotype._gene_array)))
-                switch_gene_taskqueue_len = len(genotype._gene_array[switch_gene_other_idx].tasksqueue)
-                if switch_gene_taskqueue_len == 0:
-                    continue
-                switch_task_other_idx = random.choice(range(switch_gene_taskqueue_len))
-                switch_task_this_idx = random.choice(range(len(gene.tasksqueue)))
+        if random() <= mutation_coefficient1:
+            switch_taskque_gene_1_idx = random.choice(range(len(genotype._gene_array)))
+            switch_taskque_gene_2_idx = random.choice(range(len(genotype._gene_array)))
+            if not(switch_taskque_gene_1_idx == switch_taskque_gene_2_idx):
+                temp = genotype._gene_array[switch_taskque_gene_1_idx].tasksqueue
+                genotype._gene_array[switch_taskque_gene_1_idx].tasksqueue = genotype._gene_array[switch_taskque_gene_2_idx].tasksqueue 
+                genotype._gene_array[switch_taskque_gene_2_idx].tasksqueue = temp
+
+        if mutation_coefficient2>0 or mutation_coefficient3>0:
+            for gene in genotype._gene_array:
+                
+                if random() <= mutation_coefficient2 and len(gene.tasksqueue) != 0:
+                    #need to switch one task of the current gene with another task of a random gene
+                    switch_gene_other_idx = random.choice(range(len(genotype._gene_array)))
+                    switch_gene_taskqueue_len = len(genotype._gene_array[switch_gene_other_idx].tasksqueue)
+                    if not (switch_gene_taskqueue_len == 0):
+                        switch_task_other_idx = random.choice(range(switch_gene_taskqueue_len))
+                        switch_task_this_idx = random.choice(range(len(gene.tasksqueue)))
 
 
-                switch_temp = genotype._gene_array[switch_gene_other_idx].tasksqueue[switch_task_other_idx]
-                genotype._gene_array[switch_gene_other_idx].tasksqueue[switch_task_other_idx] = gene.tasksqueue[switch_task_this_idx]
-                gene.tasksqueue[switch_task_this_idx] = switch_temp
-                    
+                        switch_temp = genotype._gene_array[switch_gene_other_idx].tasksqueue[switch_task_other_idx]
+                        genotype._gene_array[switch_gene_other_idx].tasksqueue[switch_task_other_idx] = gene.tasksqueue[switch_task_this_idx]
+                        gene.tasksqueue[switch_task_this_idx] = switch_temp
+
+                if mutation_coefficient3 > 0 and len(gene.tasksqueue) >=2:
+                    for task_idx in range(len(gene.tasksqueue)):
+                        if random() <= mutation_coefficient3:
+                            switch_task_idx = random.choice(range(len(gene.tasksqueue)))
+                            
+                            temp = gene.tasksqueue[task_idx]
+                            gene.tasksqueue[task_idx] = gene.tasksqueue[switch_task_idx] 
+                            gene.tasksqueue[switch_task_idx] = gene.tasksqueue[task_idx]
+
+def epoch():
+    while True:
+        if no_task:
+            continue
+        #add tasks to genotype
+        if new_tasks:
+            with epoch_lock:
+                add_tasks_to_genotype(new_tasks)
+                new_tasks = []
+        #fitnesscalc
+        fitness_eval(population.population_array)
+
+        #parent_selection
+        parents = parent_selection(population.population_array)
+
+        #crossover
+        children = []
+        for i in range(n_children):
+            children.append(partially_mapped_crossover(random.choice(parents), random.choice(parents)))
+
+        #mutation
+        mutation(children)
+
+        #fitnesscalc
+        fitness_eval(children)
+
+        #selection
+        population.population_array = selection(poolsize, children)
+        
+        #check for best solution and send happens in fitness_eval
+
+        #loop                 
+
+
+"""Egress""" 
+
+"""Ingress"""
+app = Flask(__name__)
+
+def update_batch():
+    while True:
+            if update_q.empty():
+            #nothing to do
+                continue
+
+            #buffer updates for 2 seconds if new ones arrive in that time reset buffer
+            while True:
+                size = update_q.qsize()
+                time.sleep(buffer_time)
+                if update_q.qsize() == size:
+                    print(f"this is the amount of tasks when we go to batch processing: {size}", flush=True)
+                    break
+            #handle batch of updates since it is locked there will be no more during the process
+            while not update_q.empty():
+                with update_lock:
+                    try:
+                        task_raw = update_q.get(block=False)
+                    except:
+                        #taskqueue is empty
+                        break
+                print(f"this is the task in raw state: {task_raw}", flush=True)
+
+                task_cast = Task(task_raw['id'], task_raw['status'], task_raw['tenant'])
+                print(f"this is the task in processed state: {task_cast}", flush=True)
+                if task_cast.status == "Pending":
+                    with epoch_lock:
+                        new_tasks.append(task_cast)
+                    all_tasks[task_cast.id] = task_cast
+                    no_task = False
+                if task_cast.status == "Scheduled":
+                    del all_tasks[task_cast.id]
+                    if not all_tasks:
+                        no_task = True
+
+
+#-----this is from the main scheduler-----#
+#get updates of workqueue from the main scheduler
+@app.route('/init', methods=['POST'])
+def init_request():
+    # first time init is called
+    for node_id in request.json.keys():
+        current_resources.resource_array.append(Node(int(node_id)))
+    init(poolsize)
+    print(f"this is the current resources: {current_resources}", flush=True)
+    return('', 204)
+
+@app.route('/test', methods=['GET'])
+def test():
+    return 'OK', 200
+
+@app.route('/update', methods=['POST'])
+def update():
+    print("update called", flush=True)
+    incoming_task = request.json
+    with update_lock:
+        update_q.put(incoming_task)
+    return 'OK', 200
+
 
 if __name__ == '__main__':
     flask_thread = Thread(target=app.run, kwargs={'host': '0.0.0.0' , 'port': '80'})
     flask_thread.start()
-"""Egress""" 
+    batch_thread = Thread(target=update_batch(), daemon=True)
+    batch_thread.start()

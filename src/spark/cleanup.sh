@@ -1,4 +1,5 @@
 #!/bin/bash
+helm uninstall scheduler --wait
 kubectl delete pods --all -n spark-namespace
 kubectl delete svc --all -n spark-namespace
 
