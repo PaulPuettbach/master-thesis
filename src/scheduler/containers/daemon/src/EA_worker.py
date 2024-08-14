@@ -1,10 +1,13 @@
 from flask import Flask, request
+import requests
 import math
 import random
 import time
 from bitmap import BitMap
-from threading import Thread, Lock
-from queue import Queue
+import threading
+import os
+import multiprocessing
+import copy
 
 """
 fairness based on queue are all tenants getting teh same resources
@@ -251,6 +254,9 @@ mutation_coefficient1 = 0
 mutation_coefficient2 = 0
 mutation_coefficient3 = 0.3
 
+#need the default value for the unit tests to work
+main_service = os.getenv('MAIN-SERVICE', "did not import")
+
 
 """
 gloabl variables
@@ -262,16 +268,23 @@ current_resources = CurrentResources([])
 #a queue of the tasks that still need to be added to the genotype
 new_tasks = []
 #a array of all tasks that are unscheduled
-all_tasks = []
+old_tasks = []
 # these two are for batch processing incoming tasks
-update_q = Queue()
-update_lock = Lock()
-# a lock for the epock
-epoch_lock = Lock()
+update_q = []
+# a lock for the processes for the new_tasks
+process_lock_new_tasks = multiprocessing.RLock()
+# a lock for the processes for the new_tasks
+process_lock_old_tasks = multiprocessing.RLock()
+# a lock for the threads for the updateq
+thread_lock_update_q = threading.RLock()
+#event that tasks arrived
+tasks_arrived = threading.Event()
 # weather the genotype task array is empty
-no_task = True
+no_task = multiprocessing.Value('b', True)
+# weather the genotype task array is empty
+init_done = multiprocessing.Value('b', False)
 #the best current fitnessvalue
-best_solution_fitness = 0
+best_solution = Genotype([])
 
 
 
@@ -347,13 +360,17 @@ def locality(genotype):
 
 
 def fitness_eval(to_eval):
+    global fairness_coef
+    global local_coef
+    global best_solution
     if not isinstance(to_eval[0], Genotype):
         raise TypeError("fitness eval called with wrong parameter type")
     for genotype in to_eval:
         fitness = fairness_coef * fairness(genotype) + local_coef * locality(genotype)
         genotype.fitnessvalue = fitness
-        if fitness > best_solution_fitness:
-            pass
+        if fitness > best_solution.fitnessvalue:
+            best_solution = genotype
+            
     
 
 #iterate n times. N being equal to poolsize
@@ -370,6 +387,9 @@ description:
     Initialize the pool of genotypes with randomized Genotypes
 """
 def init(size):
+    global population
+    global current_resources
+    global init_done
     if type(size) is not int:
         raise TypeError("init called with wrong parameter type")
 
@@ -380,10 +400,11 @@ def init(size):
             gene = Gene(resource, [])
             genotype._gene_array.append(gene)
         population.population_array.append(genotype)
-
+    with init_done.get_lock():
+        init_done.value = True
 """
 input:  
-    - new_taks ([tasks]) the new pending tasks at the time of the the function call
+    - new_tasks ([tasks]) the new pending tasks at the time of the the function call
 output: 
     - nothing
 constrains:
@@ -391,19 +412,44 @@ constrains:
 description:
     Add the new not yet considered pending tasks to the population
 """
-def add_tasks_to_genotype(new_taks):
-    if not isinstance(new_taks[0], Task):
-        raise TypeError("add_tasks_to_genotype called with wrong parameter type")
-    if len(new_taks) < 1:
-        raise Exception("add_tasks_to_genotype called with empty task queue")
+def add_tasks_to_genotype():
+    global population
+    global current_resources
+    global new_tasks
     
-
 #iterate n times. N being equal to poolsize
-    for genotype in population.population_array:
-        for task in new_taks:
+    while new_tasks:
+        task = new_tasks.pop()
+        for genotype in population.population_array:
             resource_id = random.randint(0, len(current_resources.resource_array) -1 )# including the last number so minus one for index
             genotype._gene_array[resource_id].tasksqueue.append(task)
-    no_task = False
+
+
+"""
+input:  
+    - old_tasks ([tasks]) the old scheduled tasks at the time of the the function call
+output: 
+    - nothing
+constrains:
+    - none
+description:
+    delete the old already scheduled tasks from the genotype
+"""
+def del_tasks_from_genotype():
+    global population
+    global old_tasks
+
+    while old_tasks:
+        task = old_tasks.pop()
+        for gene in [gene for genotype in population.population_array for gene in genotype._gene_array]:
+            try:
+                gene.tasksqueue.remove(task)
+            except ValueError:
+                pass
+    if not [tasks for genes in population.population_array[0]._gene_array for tasks in genes.tasksqueue]:
+        with no_task.get_lock():
+            no_task.value = True
+
 
 """
 input:  
@@ -416,6 +462,7 @@ description:
     the input shoudl just be the children and we do the rest when calling the function
 """
 def selection(n, to_select):
+    global population
     if n > len(to_select):
         return "Error: n is greater than the size of the array."
     if n == len(to_select):
@@ -471,6 +518,8 @@ description:
     find a number of parents acording to tournament selction the higher the k the higher the selection pressure
 """
 def parent_selection(population):
+    global n_parents
+    global k
     if not isinstance(n_parents, int) or not isinstance(k, int):
         raise TypeError("parent selection called with wrong parameter type")
     if k >= len(population) or k<1 :
@@ -524,6 +573,7 @@ description:
 
 """
 def partially_mapped_crossover(parent1, parent2):
+    global k_point
     if not isinstance(parent1, Genotype) or not isinstance(parent2, Genotype):
         raise TypeError("k_point_crossover called with wrong parameter type")
     
@@ -642,7 +692,7 @@ def partially_mapped_crossover(parent1, parent2):
         
         while other_idx < len(other_parent_tasks):
             if not bm.test(other_parent_tasks[other_idx].id):
-                leftover_tasks.append(other_parent_tasks[other_idx])
+                leftover_tasks.append(other_parent_tasks[other_idx]   )
             other_idx = other_idx +1
         gene_idx = gene_idx +1
         
@@ -665,6 +715,9 @@ description:
     this should be included in the determination of the mutation coefficient 
 """
 def mutation(input_array):
+    global mutation_coefficient1
+    global mutation_coefficient2
+    global mutation_coefficient3
     if not isinstance(input_array[0], Genotype):
         raise TypeError("init called with wrong parameter type")
     for genotype in input_array:
@@ -702,14 +755,28 @@ def mutation(input_array):
                             gene.tasksqueue[switch_task_idx] = gene.tasksqueue[task_idx]
 
 def epoch():
+    global poolsize
+    global no_task
+    global new_tasks
+    global old_tasks
+    global n_children
+    global population
+    global init_done
+    global best_solution
     while True:
-        if no_task:
+        if no_task.value or not init_done.value:
             continue
-        #add tasks to genotype
-        if new_tasks:
-            with epoch_lock:
-                add_tasks_to_genotype(new_tasks)
-                new_tasks = []
+        print(f"get to after the no task value there should be stuff in the new tasks: {new_tasks}", flush=True)
+        #add tasks to genotype dont need atomicity here if something is put into new_tasks or old_tasks from the batch update while this runs do it next epocj rather than lock
+        with process_lock_new_tasks:
+            if new_tasks:
+                add_tasks_to_genotype()
+        #del tasks to genotype
+        with process_lock_old_tasks:
+            if old_tasks:
+                del_tasks_from_genotype()
+
+        
         #fitnesscalc
         fitness_eval(population.population_array)
 
@@ -727,6 +794,9 @@ def epoch():
         #fitnesscalc
         fitness_eval(children)
 
+        worker_thread = threading.Thread(target=update_solution, args=[best_solution])
+        worker_thread.start()
+
         #selection
         population.population_array = selection(poolsize, children)
         
@@ -735,51 +805,74 @@ def epoch():
         #loop                 
 
 
-"""Egress""" 
+"""Egress"""
+def update_solution(solution):
+    url = f"http://{main_service}/update-solution"
+    json_obj = {"fitness": solution.fitnessvalue}
+    for gene in solution._gene_array:
+        json_obj[gene.resource.id] = []
+        for task in gene:
+            json_obj[gene.resource.id].append(task.id)
+    print(f"this is the json that is send {json_obj}")
+    response = requests.post(url, json = json_obj)
+    if response.status_code < 400:
+        print(f"Request successful with status code: {response.status_code}")
+        print(response.text)
+        return response
+    else:
+        print(f"Request failed with status code {response.status_code}")
+    
 
 """Ingress"""
 app = Flask(__name__)
 
+
+
 def update_batch():
+    global tasks_arrived
+    global buffer_time
+    global thread_lock_update_q
+    global process_lock_new_tasks
+    global process_lock_old_tasks
+    global new_tasks
+    global old_tasks
+    global no_task
+    global update_q
     while True:
-            if update_q.empty():
-            #nothing to do
-                continue
+        tasks_arrived.wait()
 
-            #buffer updates for 2 seconds if new ones arrive in that time reset buffer
-            while True:
-                size = update_q.qsize()
-                time.sleep(buffer_time)
-                if update_q.qsize() == size:
-                    print(f"this is the amount of tasks when we go to batch processing: {size}", flush=True)
-                    break
-            #handle batch of updates since it is locked there will be no more during the process
-            while not update_q.empty():
-                with update_lock:
-                    try:
-                        task_raw = update_q.get(block=False)
-                    except:
-                        #taskqueue is empty
-                        break
-                print(f"this is the task in raw state: {task_raw}", flush=True)
+        #generate batch
+        while tasks_arrived.is_set():
+            tasks_arrived.clear()
+            time.sleep(buffer_time)
 
-                task_cast = Task(task_raw['id'], task_raw['status'], task_raw['tenant'])
-                print(f"this is the task in processed state: {task_cast}", flush=True)
-                if task_cast.status == "Pending":
-                    with epoch_lock:
-                        new_tasks.append(task_cast)
-                    all_tasks[task_cast.id] = task_cast
-                    no_task = False
-                if task_cast.status == "Scheduled":
-                    del all_tasks[task_cast.id]
-                    if not all_tasks:
-                        no_task = True
+        with thread_lock_update_q:
+            temp_copy = copy.deepcopy(update_q)
+            update_q = []
+        for task_raw in temp_copy:
+            print(f"this is the task in raw state: {task_raw}", flush=True)
+
+            task_cast = Task(task_raw['id'], task_raw['status'], Tenant(task_raw['tenant']))
+            print(f"this is the task in processed state: {task_cast}", flush=True)
+            if task_cast.status == "Pending":
+                with process_lock_new_tasks:
+                    new_tasks.append(task_cast)
+                with no_task.get_lock():
+                    no_task.value = False
+                    print(f"get to end of no task = false there should be stuff in the new_tasks: {new_tasks}", flush=True)
+            if task_cast.status == "Scheduled":
+                with process_lock_old_tasks:
+                    old_tasks.append(task_cast)
+    
+
 
 
 #-----this is from the main scheduler-----#
 #get updates of workqueue from the main scheduler
 @app.route('/init', methods=['POST'])
 def init_request():
+    global poolsize
+    global current_resources
     # first time init is called
     for node_id in request.json.keys():
         current_resources.resource_array.append(Node(int(node_id)))
@@ -793,15 +886,25 @@ def test():
 
 @app.route('/update', methods=['POST'])
 def update():
+    global thread_lock_update_q
+    global tasks_arrived
     print("update called", flush=True)
     incoming_task = request.json
-    with update_lock:
-        update_q.put(incoming_task)
+    update_q = []
+    with thread_lock_update_q:
+        update_q.append(incoming_task)
+        tasks_arrived.set()
     return 'OK', 200
+
+def util_process():
+    #IO bound
+    flask_thread = threading.Thread(target=app.run, kwargs={'host': '0.0.0.0' , 'port': '80'})
+    flask_thread.start()
 
 
 if __name__ == '__main__':
-    flask_thread = Thread(target=app.run, kwargs={'host': '0.0.0.0' , 'port': '80'})
-    flask_thread.start()
-    batch_thread = Thread(target=update_batch(), daemon=True)
-    batch_thread.start()
+
+    #CPU bound
+    batch_process = multiprocessing.Process(target=util_process)
+    batch_process.start()
+    epoch()

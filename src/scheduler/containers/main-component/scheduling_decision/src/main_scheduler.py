@@ -23,11 +23,10 @@ worker_service_port = os.environ['DAEMON-SERVICE-PORT']
 #make dictonary 
 node_id = 0
 pod_id = 0
+pod_dic = {}
+resource_dic = {}
+best_fitness = 0
 
-"""Ingress"""
-@app.route('/test', methods=['POST'])
-def test():
-    print("test")
 
 
 """Logic"""
@@ -63,12 +62,15 @@ def watch_pod():
 #every new spark task comes with multiple pods they come in at the same time so we buffer for time
     w = watch.Watch()
     global pod_id
+    global pod_dic
     for event in w.stream(v1.list_namespaced_pod, "spark-namespace"):
         if event['object'].status.phase == "Pending" and event['object'].spec.scheduler_name == "custom-scheduler":
             tenantname =  [x.value for x in event['object'].spec.containers[0].env if x.name == "SPARK_USER"][0]
             #update the worker nodes
             update_worker(pod_id, tenantname, "Pending")
-            schedule(event['object'].metadata, nodes_available()[0])
+            pod_dic[pod_id] = event['object'].metadata
+            pod_id += 1
+            #schedule(event['object'].metadata, nodes_available()[0])
 
 # only need this if the number of nodes changes
 # def watch_node():
@@ -78,7 +80,28 @@ def watch_pod():
 #         if event['object'].status.phase == "Pending" and event['object'].spec.scheduler_name == scheduler_name:
 #             # do something
 
+def schedule_on_node(resource_id, ids):
+    global resource_dic
+    global pod_dic
+    for id in ids:
+        schedule(resource_dic[resource_id], pod_dic[id])
+
+
                     
+"""Ingress"""
+@app.route('/update-solution', methods=['POST'])
+def update():
+    global best_fitness
+    update = request.json
+    for id in update:
+        if id == "fitness":
+            print("get here", flush = True)
+            if update[id] < best_fitness:
+                break
+            else:
+                continue
+        worker = Thread(target=schedule_on_node, args=[id, update[id]])
+        worker.start()
 
 
 """Egress"""
@@ -92,6 +115,7 @@ def test_worker():
         print(response.text)
         return response
     else:
+        print(f"Request unsuccessful with status code: {response.status_code}")
         print("server not ready")
         sleep(2)
         test_worker()
@@ -99,18 +123,18 @@ def test_worker():
 def init_worker():
     url = f"http://{worker_service}/init"
     print(f"this is the url that it is pinging {url}")
-    json_obj = {}
     global node_id
+    global resource_dic
+    count = 0
     for count, node in enumerate(nodes_available()):
-        json_obj[count + node_id] = node
+        resource_dic[count + node_id] = node
     node_id = count + node_id
-    response = requests.post(url, json = json_obj)
+    response = requests.post(url, json = resource_dic)
     if response.status_code < 400:
         print(f"Request successful with status code: {response.status_code}")
         print(response.text)
         return response
     else:
-        print(f"Request failed with status code {response.status_code}")
         print(f"Request failed with status code {response.status_code}")
 
 def update_worker(id, tenant, status):
@@ -133,6 +157,7 @@ def main():
     #     p = executor.submit(watch_pod)
     flask_thread = Thread(target=app.run, kwargs={'host': '0.0.0.0', 'port': '80'})
     flask_thread.start()
+      
     test_worker()
     init_worker()
     watch_pod()
