@@ -1,12 +1,11 @@
 #!/bin/bash
 ./cleanup.sh
 
-cd ../scheduler/containers/util
+cd ../random
 
-./load-repo.sh
+./repo_load.sh
 
-cd ../../
-helm install scheduler main-helm-chart/ --wait
+helm install scheduler helm-random/ --wait
 cd ../spark
 
 kubectl apply -f service.account.yaml
@@ -18,7 +17,7 @@ kubectl apply -f service.account.yaml
     --name shortest-path \
     --conf spark.kubernetes.namespace=spark-namespace \
     --conf spark.executor.instances=5 \
-    --conf spark.kubernetes.scheduler.name=custom-scheduler \
+    --conf spark.kubernetes.scheduler.name=random-scheduler \
     --conf spark.kubernetes.authenticate.driver.serviceAccountName=spark \
     --conf spark.kubernetes.container.image=docker.io/paulpuettbach/spark_image/spark:test \
     local:///opt/spark/benchmark/my-spark-project-1.0.jar

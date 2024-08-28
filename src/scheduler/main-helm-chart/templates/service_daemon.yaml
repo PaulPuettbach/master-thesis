@@ -13,4 +13,7 @@ spec:
       targetPort: http
       protocol: TCP
   selector:
-    {{- include "main-helm-chart.selectorLabels" . | nindent 4 }}{{ .Values.daemon.service.name }}
+    {{- include "main-helm-chart.selectorLabels" . | nindent 4 }}
+    {{- range $key, $val := .Values.daemon.labels }}
+    {{ $key }}: {{ $val}}
+    {{- end }}

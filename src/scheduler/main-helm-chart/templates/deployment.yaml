@@ -65,9 +65,13 @@ spec:
             - -c
             - >
               until nslookup {{ include "main-helm-chart.fullname" . }}{{ .Values.daemon.service.name }};
-              do echo waiting for{{ include "main-helm-chart.fullname" . }}{{ .Values.daemon.service.name }};
+              do echo "Waiting for DNS to resolve {{ include "main-helm-chart.fullname" . }}{{ .Values.daemon.service.name }}";
               sleep 2;
-              done
+              done;
+              until wget -qO- http://{{ include "main-helm-chart.fullname" . }}{{ .Values.daemon.service.name }}/health;
+              do echo "Waiting for HTTP service http://{{ include "main-helm-chart.fullname" . }}{{ .Values.daemon.service.name }}/health";
+              sleep 5;
+              done;
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

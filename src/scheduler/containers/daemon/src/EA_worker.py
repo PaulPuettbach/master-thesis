@@ -3,9 +3,11 @@ import requests
 import math
 import random
 import time
+from queue import Empty
 from bitmap import BitMap
 import threading
 import os
+import sys
 import multiprocessing
 import copy
 
@@ -103,9 +105,9 @@ class Task:
             raise ValueError(f"id as integer bigger or equal to 0 expected, got {id}")
         self.id = id
 
-        allowed_status = ["Pending", "Scheduled", "Finished"]
+        allowed_status = ["Pending", "Running", "Succeeded"]
         if not(isinstance(status, str) and status in allowed_status):
-            raise ValueError(f"status should be one of \"Pending\", \"Scheduled\", \"Finished\" expected, got {status}")
+            raise ValueError(f"status should be one of \"Pending\", \"Running\", \"Succeeded\" expected, got {status}")
         self.status = status
 
         if not(isinstance(tenant, Tenant)):
@@ -202,17 +204,6 @@ class Population:
     def __repr__(self):
         return f'Population(size: {len(self.population_array)}, first 10 genotypes: {self.population_array[0:10]})'
     
-class CurrentResources:
-    def __init__(self, resource_array):
-        if not ((all(isinstance(node, Node) for node in resource_array)) or (len(resource_array) == 0)) :
-            raise ValueError("resource_array should be a an empty list or contain Node objects")
-        self.resource_array = resource_array
-
-    def __str__(self):
-        return f'current_resources(size: {len(self.resource_array)}, list of nodes: {self.resource_array})'
-    def __repr__(self):
-        return f'current_resources(size: {len(self.resource_array)}, list of nodes: {self.resource_array})'
-
 class Node:
     def __init__(self,id):
         if not(isinstance(id, int) and id >= 0):
@@ -252,7 +243,7 @@ k_point=1
 #see mutation for explenation
 mutation_coefficient1 = 0
 mutation_coefficient2 = 0
-mutation_coefficient3 = 0.3
+mutation_coefficient3 = 0
 
 #need the default value for the unit tests to work
 main_service = os.getenv('MAIN-SERVICE', "did not import")
@@ -263,29 +254,43 @@ gloabl variables
 """
 # the whole population of the genotypes
 population = Population([])
+#a queue of the resource nodes arriving in init
+resources_queue = multiprocessing.Queue()
 #a list of the resource nodes available
-current_resources = CurrentResources([])
+current_resources = []
+#the number of new tasks
+n_new_tasks = multiprocessing.Value('i', 0)
 #a queue of the tasks that still need to be added to the genotype
-new_tasks = []
+new_tasks = multiprocessing.Queue()
+#the number of old tasks
+n_old_tasks = multiprocessing.Value('i', 0)
 #a array of all tasks that are unscheduled
-old_tasks = []
+old_tasks = multiprocessing.Queue()
 # these two are for batch processing incoming tasks
 update_q = []
-# a lock for the processes for the new_tasks
-process_lock_new_tasks = multiprocessing.RLock()
-# a lock for the processes for the new_tasks
-process_lock_old_tasks = multiprocessing.RLock()
 # a lock for the threads for the updateq
 thread_lock_update_q = threading.RLock()
 #event that tasks arrived
 tasks_arrived = threading.Event()
+#event that init call arrived
+http_init = multiprocessing.Event()
+#number of nodes in init call
+n_init = multiprocessing.Value('i', 0)
+#event that init call arrived
+node_update = multiprocessing.Event()
+#number of nodes in init call
+n_node= multiprocessing.Value('i', 0)
 # weather the genotype task array is empty
 no_task = multiprocessing.Value('b', True)
-# weather the genotype task array is empty
-init_done = multiprocessing.Value('b', False)
 #the best current fitnessvalue
 best_solution = Genotype([])
+#weather there is a new best solution
+new_best = False
 
+#taken from https://stackoverflow.com/questions/8391411/how-to-block-calls-to-print
+# Disable
+def blockPrint():
+    sys.stdout = open(os.devnull, 'w')
 
 
 """
@@ -363,6 +368,7 @@ def fitness_eval(to_eval):
     global fairness_coef
     global local_coef
     global best_solution
+    global new_best
     if not isinstance(to_eval[0], Genotype):
         raise TypeError("fitness eval called with wrong parameter type")
     for genotype in to_eval:
@@ -370,6 +376,7 @@ def fitness_eval(to_eval):
         genotype.fitnessvalue = fitness
         if fitness > best_solution.fitnessvalue:
             best_solution = genotype
+            new_best = True
             
     
 
@@ -388,41 +395,103 @@ description:
 """
 def init(size):
     global population
+    global resources_queue
+    global n_init
     global current_resources
-    global init_done
     if type(size) is not int:
         raise TypeError("init called with wrong parameter type")
 
+
 #iterate n times. N being equal to size
+#M number of resources N population size means O(M)+O(N*M) is better if M < N
+    print("get into the init call", flush=True)
+    rec_resource_counter = 0
+    while True:
+        with n_init.get_lock():
+            #done
+            if rec_resource_counter == n_init.value:
+                break
+        try:
+            temp = resources_queue.get_nowait()
+            resource = temp[0]
+        except Empty:
+            continue
+        current_resources.append(resource)
+        rec_resource_counter += 1 
+
     for i in range(size):
         genotype = Genotype([])
-        for resource in current_resources.resource_array:
+        for resource in current_resources:
             gene = Gene(resource, [])
             genotype._gene_array.append(gene)
         population.population_array.append(genotype)
-    with init_done.get_lock():
-        init_done.value = True
+
 """
 input:  
-    - new_tasks ([tasks]) the new pending tasks at the time of the the function call
+    - none
+output: 
+    - none
+constrains:
+    - none
+description:
+    add nodes from the queue to the current resources
+"""
+
+def update_current_resources():
+    global resources_queue
+    global n_node
+    global current_resources
+    rec_node_counter = 0
+
+    while True:
+        with n_node.get_lock():
+            #done
+            if rec_node_counter == n_node.value:
+                break
+        try:
+            node, operation = resources_queue.get_nowait()
+        except Empty:
+            continue
+        rec_node_counter += 1 
+        if operation == "add":
+            current_resources.append(node)
+        elif operation == "delete":
+            current_resources.remove(node)
+
+"""
+input:  
+    - nothing
 output: 
     - nothing
 constrains:
     - none
 description:
-    Add the new not yet considered pending tasks to the population
+    Add the new not yet considered pending tasks to the population from the new task queue
 """
 def add_tasks_to_genotype():
     global population
     global current_resources
     global new_tasks
+
+    rec_task_counter = 0
+
+    while True:
+        with n_new_tasks.get_lock():
+            #done
+            if rec_task_counter == n_new_tasks.value:
+                break
+        try:
+            task = new_tasks.get_nowait()
+        except Empty:
+            continue
+        rec_task_counter += 1 
     
-#iterate n times. N being equal to poolsize
-    while new_tasks:
-        task = new_tasks.pop()
+    #iterate n times. N being equal to poolsize
         for genotype in population.population_array:
-            resource_id = random.randint(0, len(current_resources.resource_array) -1 )# including the last number so minus one for index
+            resource_id = random.randint(0, len(current_resources) -1 )# including the last number so minus one for index
             genotype._gene_array[resource_id].tasksqueue.append(task)
+    with n_new_tasks.get_lock():
+        n_new_tasks.value = 0
 
 
 """
@@ -439,8 +508,19 @@ def del_tasks_from_genotype():
     global population
     global old_tasks
 
-    while old_tasks:
-        task = old_tasks.pop()
+    rec_task_counter = 0
+
+    while True:
+        with n_old_tasks.get_lock():
+            #done
+            if rec_task_counter == n_old_tasks.value:
+                break
+        try:
+            task = old_tasks.get_nowait()
+        except Empty:
+            continue
+        rec_task_counter += 1 
+
         for gene in [gene for genotype in population.population_array for gene in genotype._gene_array]:
             try:
                 gene.tasksqueue.remove(task)
@@ -449,6 +529,8 @@ def del_tasks_from_genotype():
     if not [tasks for genes in population.population_array[0]._gene_array for tasks in genes.tasksqueue]:
         with no_task.get_lock():
             no_task.value = True
+    with n_old_tasks.get_lock():
+        n_old_tasks.value = 0
 
 
 """
@@ -462,6 +544,7 @@ description:
     the input shoudl just be the children and we do the rest when calling the function
 """
 def selection(n, to_select):
+
     global population
     if n > len(to_select):
         return "Error: n is greater than the size of the array."
@@ -520,6 +603,7 @@ description:
 def parent_selection(population):
     global n_parents
     global k
+
     if not isinstance(n_parents, int) or not isinstance(k, int):
         raise TypeError("parent selection called with wrong parameter type")
     if k >= len(population) or k<1 :
@@ -574,6 +658,7 @@ description:
 """
 def partially_mapped_crossover(parent1, parent2):
     global k_point
+
     if not isinstance(parent1, Genotype) or not isinstance(parent2, Genotype):
         raise TypeError("k_point_crossover called with wrong parameter type")
     
@@ -703,10 +788,10 @@ def partially_mapped_crossover(parent1, parent2):
 input:  
     - input_array([Genotype]): a list of all the Genotypes that need to be mutated
     - mutation_coefficient1(float): between 0 and 1 mutation chance for an entire taskqueue to be swapped between nodes
-    - mutation_coefficient2(float): between 0 and 1 mutation chance for each of the genes that random task is taken and added to another node
+    - mutation_coefficient2(float): between 0 and 1 mutation chance for each of the genes that a random task is taken and added to another node/gene
     - mutation_coefficient3(float): between 0 and 1 mutation chance for each task to switch with another task on the same node
 output:
-    - output_array([Genotype]): a list of all the now mutated Genotypes
+    - no return value input array is mutated in place
 constrains:
     - same order of input and output array
 description:
@@ -718,41 +803,45 @@ def mutation(input_array):
     global mutation_coefficient1
     global mutation_coefficient2
     global mutation_coefficient3
+    
+
+
     if not isinstance(input_array[0], Genotype):
-        raise TypeError("init called with wrong parameter type")
+        raise TypeError("mutation called with wrong parameter type")
+    
     for genotype in input_array:
-        if random() <= mutation_coefficient1:
+        if random.random() <= mutation_coefficient1:
             switch_taskque_gene_1_idx = random.choice(range(len(genotype._gene_array)))
-            switch_taskque_gene_2_idx = random.choice(range(len(genotype._gene_array)))
-            if not(switch_taskque_gene_1_idx == switch_taskque_gene_2_idx):
+            idx_except_current = [i for i in range(len(genotype._gene_array)) if i != switch_taskque_gene_1_idx]
+            if idx_except_current:
+                switch_taskque_gene_2_idx = random.choice(idx_except_current)
+
                 temp = genotype._gene_array[switch_taskque_gene_1_idx].tasksqueue
                 genotype._gene_array[switch_taskque_gene_1_idx].tasksqueue = genotype._gene_array[switch_taskque_gene_2_idx].tasksqueue 
                 genotype._gene_array[switch_taskque_gene_2_idx].tasksqueue = temp
 
         if mutation_coefficient2>0 or mutation_coefficient3>0:
-            for gene in genotype._gene_array:
+            for idx, gene in enumerate(genotype._gene_array):
                 
-                if random() <= mutation_coefficient2 and len(gene.tasksqueue) != 0:
+                if random.random() <= mutation_coefficient2 and len(gene.tasksqueue) != 0:
                     #need to switch one task of the current gene with another task of a random gene
-                    switch_gene_other_idx = random.choice(range(len(genotype._gene_array)))
-                    switch_gene_taskqueue_len = len(genotype._gene_array[switch_gene_other_idx].tasksqueue)
-                    if not (switch_gene_taskqueue_len == 0):
-                        switch_task_other_idx = random.choice(range(switch_gene_taskqueue_len))
-                        switch_task_this_idx = random.choice(range(len(gene.tasksqueue)))
-
-
-                        switch_temp = genotype._gene_array[switch_gene_other_idx].tasksqueue[switch_task_other_idx]
-                        genotype._gene_array[switch_gene_other_idx].tasksqueue[switch_task_other_idx] = gene.tasksqueue[switch_task_this_idx]
-                        gene.tasksqueue[switch_task_this_idx] = switch_temp
+                    idx_except_current = [i for i in range(len(genotype._gene_array)) if i != idx]
+                    if(idx_except_current):
+                        gene_other_idx = random.choice(idx_except_current)
+                        task = random.choice(gene.tasksqueue)
+                        genotype._gene_array[gene_other_idx].tasksqueue.append(task)
+                        gene.tasksqueue.remove(task)
 
                 if mutation_coefficient3 > 0 and len(gene.tasksqueue) >=2:
-                    for task_idx in range(len(gene.tasksqueue)):
-                        if random() <= mutation_coefficient3:
-                            switch_task_idx = random.choice(range(len(gene.tasksqueue)))
-                            
-                            temp = gene.tasksqueue[task_idx]
-                            gene.tasksqueue[task_idx] = gene.tasksqueue[switch_task_idx] 
-                            gene.tasksqueue[switch_task_idx] = gene.tasksqueue[task_idx]
+                    for task_idx, task in enumerate(gene.tasksqueue):
+                        if random.random() <= mutation_coefficient3:
+                            idx_except_current = [i for i in range(len(gene.tasksqueue)) if i != task_idx]
+                            if(idx_except_current):
+                                switch_task_idx = random.choice(idx_except_current)
+                                
+                                temp = gene.tasksqueue[task_idx]
+                                gene.tasksqueue[task_idx] = gene.tasksqueue[switch_task_idx] 
+                                gene.tasksqueue[switch_task_idx] = temp
 
 def epoch():
     global poolsize
@@ -761,20 +850,24 @@ def epoch():
     global old_tasks
     global n_children
     global population
-    global init_done
     global best_solution
+    global new_best
+    global http_init
+    global node_update
+    
+    http_init.wait()
+    init(poolsize)
     while True:
-        if no_task.value or not init_done.value:
+        if no_task.value:
             continue
-        print(f"get to after the no task value there should be stuff in the new tasks: {new_tasks}", flush=True)
+        if node_update.is_set():
+            update_current_resources()
+
         #add tasks to genotype dont need atomicity here if something is put into new_tasks or old_tasks from the batch update while this runs do it next epocj rather than lock
-        with process_lock_new_tasks:
-            if new_tasks:
-                add_tasks_to_genotype()
+        add_tasks_to_genotype()
         #del tasks to genotype
-        with process_lock_old_tasks:
-            if old_tasks:
-                del_tasks_from_genotype()
+        del_tasks_from_genotype()
+
 
         
         #fitnesscalc
@@ -794,8 +887,11 @@ def epoch():
         #fitnesscalc
         fitness_eval(children)
 
-        worker_thread = threading.Thread(target=update_solution, args=[best_solution])
-        worker_thread.start()
+        if new_best:
+            new_best = False
+            print(f"new best {best_solution}", flush=True)
+            worker_thread = threading.Thread(target=update_solution, args=[best_solution])
+            worker_thread.start()
 
         #selection
         population.population_array = selection(poolsize, children)
@@ -809,11 +905,11 @@ def epoch():
 def update_solution(solution):
     url = f"http://{main_service}/update-solution"
     json_obj = {"fitness": solution.fitnessvalue}
+    print(f"new best in the update_solution {solution}", flush=True)
     for gene in solution._gene_array:
         json_obj[gene.resource.id] = []
-        for task in gene:
+        for task in gene.tasksqueue:
             json_obj[gene.resource.id].append(task.id)
-    print(f"this is the json that is send {json_obj}")
     response = requests.post(url, json = json_obj)
     if response.status_code < 400:
         print(f"Request successful with status code: {response.status_code}")
@@ -832,14 +928,13 @@ def update_batch():
     global tasks_arrived
     global buffer_time
     global thread_lock_update_q
-    global process_lock_new_tasks
-    global process_lock_old_tasks
     global new_tasks
     global old_tasks
     global no_task
     global update_q
     while True:
         tasks_arrived.wait()
+
 
         #generate batch
         while tasks_arrived.is_set():
@@ -849,20 +944,24 @@ def update_batch():
         with thread_lock_update_q:
             temp_copy = copy.deepcopy(update_q)
             update_q = []
+        counter_new = 0
+        counter_old = 0
         for task_raw in temp_copy:
-            print(f"this is the task in raw state: {task_raw}", flush=True)
-
             task_cast = Task(task_raw['id'], task_raw['status'], Tenant(task_raw['tenant']))
-            print(f"this is the task in processed state: {task_cast}", flush=True)
-            if task_cast.status == "Pending":
-                with process_lock_new_tasks:
-                    new_tasks.append(task_cast)
-                with no_task.get_lock():
-                    no_task.value = False
-                    print(f"get to end of no task = false there should be stuff in the new_tasks: {new_tasks}", flush=True)
-            if task_cast.status == "Scheduled":
-                with process_lock_old_tasks:
-                    old_tasks.append(task_cast)
+            if task_cast.status == "Pending":                
+                new_tasks.put_nowait(task_cast)
+                counter_new += 1
+            if task_cast.status == "Succeeded":
+                old_tasks.put_nowait(task_cast)
+                counter_old += 1
+            if counter_new > 0:
+                with n_new_tasks.get_lock():
+                    n_new_tasks.value = counter_new
+            if counter_old > 0:
+                with n_old_tasks.get_lock():
+                    n_old_tasks.value = counter_old
+            with no_task.get_lock():
+                no_task.value = False
     
 
 
@@ -871,26 +970,43 @@ def update_batch():
 #get updates of workqueue from the main scheduler
 @app.route('/init', methods=['POST'])
 def init_request():
-    global poolsize
-    global current_resources
+    global resources_queue
+    global http_init
+    global n_init
     # first time init is called
+    counter = 0
     for node_id in request.json.keys():
-        current_resources.resource_array.append(Node(int(node_id)))
-    init(poolsize)
-    print(f"this is the current resources: {current_resources}", flush=True)
+        resources_queue.put_nowait((Node(int(node_id)), "add"))
+        counter += 1
+    with n_init.get_lock():
+        n_init.value = counter
+    http_init.set()
     return('', 204)
 
-@app.route('/test', methods=['GET'])
-def test():
+@app.route('/node-change', methods=['POST'])
+def node_change():
+    global resources_queue
+    global node_update
+    global n_node
+    print("node change called", flush=True)
+    update = request.get_json()
+    print(f"what i put in the queue {[Node(int(list(update)[0])), update[list(update)[1]]]}", flush=True)
+    resources_queue.put_nowait([Node(int(list(update)[0])), update[list(update)[1]]])
+    with n_node.get_lock():
+        n_node.value += 1
+    node_update.set()
+    return('', 204)
+
+@app.route('/health', methods=['GET'])
+def health():
     return 'OK', 200
 
 @app.route('/update', methods=['POST'])
 def update():
     global thread_lock_update_q
     global tasks_arrived
-    print("update called", flush=True)
+    global update_q
     incoming_task = request.json
-    update_q = []
     with thread_lock_update_q:
         update_q.append(incoming_task)
         tasks_arrived.set()
@@ -900,6 +1016,8 @@ def util_process():
     #IO bound
     flask_thread = threading.Thread(target=app.run, kwargs={'host': '0.0.0.0' , 'port': '80'})
     flask_thread.start()
+    #cpu bound
+    update_batch()
 
 
 if __name__ == '__main__':

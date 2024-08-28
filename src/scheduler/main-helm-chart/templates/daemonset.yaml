@@ -5,10 +5,16 @@ metadata:
   namespace: {{ .Values.namespace }}
   labels:
     {{- include "main-helm-chart.labels" . | nindent 4 }}
+    {{- range $key, $val := .Values.daemon.labels }}
+    {{ $key }}: {{ $val}}
+    {{- end }}
 spec:
   selector:
     matchLabels:
       {{- include "main-helm-chart.selectorLabels" . | nindent 6 }}
+      {{- range $key, $val := .Values.daemon.labels }}
+      {{ $key }}: {{ $val}}
+      {{- end }}
   template:
     metadata:
     {{- with .Values.podAnnotations }}
@@ -17,6 +23,9 @@ spec:
     {{- end }}
       labels:
         {{- include "main-helm-chart.selectorLabels" . | nindent 8 }}
+        {{- range $key, $val := .Values.daemon.labels }}
+        {{ $key }}: {{ $val}}
+        {{- end }}
     spec:
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
@@ -50,9 +59,9 @@ spec:
             - -c
             - >
               until nslookup {{ include "main-helm-chart.fullname" . }}{{ .Values.main_component.service.name }};
-              do echo waiting for {{ include "main-helm-chart.fullname" . }}{{ .Values.main_component.service.name }};
+              do echo "Waiting for DNS to resolve {{ include "main-helm-chart.fullname" . }}{{ .Values.main_component.service.name }}";
               sleep 2;
-              done
+              done;
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

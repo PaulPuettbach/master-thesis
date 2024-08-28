@@ -2,7 +2,105 @@ import pytest
 import containers.daemon.src.EA_worker as src
 import threading
 import multiprocessing
+import copy
+from time import sleep
+from queue import Empty
 
+#https://stackoverflow.com/questions/19225279/pytest-init-setup-for-few-modules
+def setup_update_batch():
+        dic1 = {
+            'id': 0,
+            'status': 'Pending',
+            'tenant': 'Paul'
+        }
+        dic2 = {
+            'id': 2,
+            'status': 'Succeeded',
+            'tenant': 'Peter'
+        }
+        dic3 = {
+            'id': 1,
+            'status': 'Pending',
+            'tenant': 'Max'
+        }
+        with src.thread_lock_update_q:
+            src.update_q.append(dic1)
+            src.update_q.append(dic2)
+            src.update_q.append(dic3)
+            src.tasks_arrived.set()
+        batch_process = threading.Thread(target=src.update_batch)
+        batch_process.start()
+        # batch_process.join()
+
+def setup_update_current_resources():
+    testNode1 = src.Node(3)
+    testNode2 = src.Node(6)
+    src.resources_queue.put_nowait((testNode1, "add"))
+    src.resources_queue.put_nowait((testNode2, "add"))
+    with src.n_node.get_lock():
+        src.n_node.value = 2
+        print("get here", flush=True)
+    src.node_update.set()
+
+def setup_update_current_resources_2():
+    testNode1 = src.Node(3)
+    src.resources_queue.put_nowait((testNode1, "delete"))
+    with src.n_node.get_lock():
+        src.n_node.value = 1
+    src.node_update.set()
+
+def setup_add_tasks1():
+    tenant1 = src.Tenant("paul")
+    tenant2 = src.Tenant("peter")
+    tenant3 = src.Tenant("max")
+    
+    toadd = [src.Task(0, "Pending",tenant1), src.Task(1, "Succeeded",tenant1), src.Task(4, "Pending",tenant3), src.Task(6, "Succeeded",tenant2), src.Task(2, "Succeeded",tenant1)]
+    for task in toadd:
+        src.new_tasks.put_nowait(task)
+    with src.n_new_tasks.get_lock():
+        src.n_new_tasks.value = 5
+    with src.no_task.get_lock():
+        src.no_task.value = False
+
+def setup_add_tasks2():
+    tenant1 = src.Tenant("paul")
+    tenant2 = src.Tenant("peter")
+    tenant3 = src.Tenant("max")
+    toadd2 = [src.Task(7, "Pending",tenant2), src.Task(3, "Succeeded",tenant1), src.Task(8, "Succeeded",tenant3)]
+    for task in toadd2:
+        src.new_tasks.put_nowait(task)
+    with src.n_new_tasks.get_lock():
+        src.n_new_tasks.value = 3
+    with src.no_task.get_lock():
+        src.no_task.value = False
+
+def setup_del_tasks1():
+    tenant1 = src.Tenant("paul")
+    tenant3 = src.Tenant("max")
+    todel = [src.Task(0, "Pending",tenant1), src.Task(4, "Pending",tenant3), src.Task(2, "Succeeded",tenant1)]
+    for task in todel:
+        src.old_tasks.put_nowait(task)
+        with src.n_old_tasks.get_lock():
+            src.n_old_tasks.value = 3
+
+def setup_del_tasks2():
+    tenant1 = src.Tenant("paul")
+    tenant2 = src.Tenant("peter")
+    todel = [src.Task(1, "Succeeded",tenant1), src.Task(6, "Succeeded",tenant2), src.Task(7, "Pending",tenant2)]
+       
+    for task in todel:
+        src.old_tasks.put_nowait(task)
+    with src.n_old_tasks.get_lock():
+        src.n_old_tasks.value = 3
+
+def setup_del_tasks3():
+    tenant1 = src.Tenant("paul")
+    tenant3 = src.Tenant("max")
+    kept = [src.Task(3, "Succeeded",tenant1), src.Task(8, "Succeeded",tenant3)]
+    for task in kept:
+        src.old_tasks.put_nowait(task)
+    with src.n_old_tasks.get_lock():
+        src.n_old_tasks.value = 2
 
 class TestInstantiation:
     def test_tenant(self):
@@ -34,20 +132,20 @@ class TestInstantiation:
         with pytest.raises(ValueError):
             invalid6 = src.Task(0, "Pending",src.Tenant("paul"),False, src.Node(1))
         valid = src.Task(0, "Pending",src.Tenant("paul"), True, src.Node(1))
-        valid2 = src.Task(0, "Scheduled",src.Tenant("paul"))
-        valid3 = src.Task(0, "Finished",src.Tenant("paul"), False, None)
+        valid2 = src.Task(0, "Running",src.Tenant("paul"))
+        valid3 = src.Task(0, "Succeeded",src.Tenant("paul"), False, None)
 
     def test_gene(self):
         valid = src.Gene(src.Node(1), [])
-        valid2 = src.Gene(src.Node(1), [src.Task(0, "Pending",src.Tenant("paul"), True, src.Node(1)), src.Task(0, "Scheduled",src.Tenant("paul"))])
+        valid2 = src.Gene(src.Node(1), [src.Task(0, "Pending",src.Tenant("paul"), True, src.Node(1)), src.Task(0, "Succeeded",src.Tenant("paul"))])
         with pytest.raises(ValueError):
             invalid = src.Gene(src.Task(0, "Finished",src.Tenant("paul"), False, None), [])
         with pytest.raises(ValueError):
-            invalid2 = src.Gene(src.Node(0), [src.Task(0, "Scheduled",src.Tenant("paul")),src.Task(1, "Scheduled",src.Tenant("peter")), src.Node(9)])
+            invalid2 = src.Gene(src.Node(0), [src.Task(0, "Succeeded",src.Tenant("paul")),src.Task(1, "Succeeded",src.Tenant("peter")), src.Node(9)])
     
     def test_geneotype(self):
         gene1 = src.Gene(src.Node(1), [])
-        gene2 = src.Gene(src.Node(1), [src.Task(0, "Pending",src.Tenant("paul"), True, src.Node(1)), src.Task(1, "Scheduled",src.Tenant("paul"))])
+        gene2 = src.Gene(src.Node(1), [src.Task(0, "Pending",src.Tenant("paul"), True, src.Node(1)), src.Task(1, "Succeeded",src.Tenant("paul"))])
         valid = src.Genotype([])
         valid2 = src.Genotype([gene1,gene2])
         valid3 = src.Genotype([], 1.0)
@@ -62,13 +160,13 @@ class TestInstantiation:
             invalid3 = src.Genotype([gene1,gene2], 15.0)
         with pytest.raises(ValueError):
             #cant append task with the same id
-            valid2.append_task(src.Task(1, "Scheduled",src.Tenant("paul")), src.Node(1))
+            valid2.append_task(src.Task(1, "Succeeded",src.Tenant("paul")), src.Node(1))
 
-        valid2.append_task(src.Task(2, "Scheduled",src.Tenant("paul")), src.Node(1))
+        valid2.append_task(src.Task(2, "Succeeded",src.Tenant("paul")), src.Node(1))
     
     def test_population(self):
         gene1 = src.Gene(src.Node(1), [])
-        gene2 = src.Gene(src.Node(1), [src.Task(0, "Pending",src.Tenant("paul"), True, src.Node(1)), src.Task(1, "Scheduled",src.Tenant("paul"))])
+        gene2 = src.Gene(src.Node(1), [src.Task(0, "Pending",src.Tenant("paul"), True, src.Node(1)), src.Task(1, "Succeeded",src.Tenant("paul"))])
         individual1 = src.Genotype([])
         individual2 = src.Genotype([gene1,gene2])
         individual3 = src.Genotype([], 1.0)
@@ -76,12 +174,6 @@ class TestInstantiation:
         valid2 = src.Population([individual1,individual2,individual3])
         with pytest.raises(ValueError):
             valid2 = src.Population([individual1,individual2,individual3, src.Node(9)])
-    
-    def test_currentresources(self):
-        valid1 = src.CurrentResources([src.Node(0), src.Node(1)])
-        valid2 = src.CurrentResources([])
-        with pytest.raises(ValueError):
-            invalid1 = src.CurrentResources([src.Gene(src.Node(1), []), src.Gene(src.Node(1), [src.Task(0, "Pending",src.Tenant("paul"), True, src.Node(1)), src.Task(1, "Scheduled",src.Tenant("paul"))])])
 
     def test_node(self):
         valid1 = src.Node(0)
@@ -105,8 +197,8 @@ class TestEq:
 
     def test_task_eq(self):
         task1 = src.Task(0, "Pending",src.Tenant("paul"), True, src.Node(1))
-        task2 = src.Task(0, "Scheduled",src.Tenant("paul"))
-        task3 = src.Task(1, "Finished",src.Tenant("paul"), False, None)
+        task2 = src.Task(0, "Succeeded",src.Tenant("paul"))
+        task3 = src.Task(1, "Running",src.Tenant("paul"), False, None)
         nottask = src.Node(1)
 
         assert(task1 == task2)
@@ -117,9 +209,9 @@ class TestEq:
     def test_gene_eq(self):
         tenant1 = src.Tenant("paul")
         tenant3 = src.Tenant("max")
-        gene1 = src.Gene(src.Node(1), [src.Task(0, "Pending",tenant1), src.Task(1, "Scheduled",tenant1)])
-        gene2 = src.Gene(src.Node(1), [src.Task(1, "Scheduled",tenant1), src.Task(0, "Pending",tenant1)])
-        gene3 = src.Gene(src.Node(1), [src.Task(0, "Pending",tenant1), src.Task(1, "Scheduled",tenant1)])
+        gene1 = src.Gene(src.Node(1), [src.Task(0, "Pending",tenant1), src.Task(1, "Succeeded",tenant1)])
+        gene2 = src.Gene(src.Node(1), [src.Task(1, "Succeeded",tenant1), src.Task(0, "Pending",tenant1)])
+        gene3 = src.Gene(src.Node(1), [src.Task(0, "Pending",tenant1), src.Task(1, "Succeeded",tenant1)])
 
         assert(not(gene1 == gene2))
         assert(gene1 == gene3)
@@ -130,10 +222,10 @@ class TestEq:
         tenant1 = src.Tenant("paul")
         tenant2 = src.Tenant("peter")
         tenant3 = src.Tenant("max")
-        gene1 = src.Gene(src.Node(1), [src.Task(0, "Pending",tenant1), src.Task(1, "Scheduled",tenant1)])
-        gene2 = src.Gene(src.Node(2), [src.Task(4, "Pending",tenant3), src.Task(6, "Scheduled",tenant2), src.Task(2, "Scheduled",tenant1)])
-        gene3 = src.Gene(src.Node(3), [src.Task(7, "Pending",tenant2), src.Task(3, "Scheduled",tenant1), src.Task(8, "Scheduled",tenant3)])
-        gene4 = src.Gene(src.Node(1), [src.Task(1, "Scheduled",tenant1), src.Task(0, "Pending",tenant1)])
+        gene1 = src.Gene(src.Node(1), [src.Task(0, "Pending",tenant1), src.Task(1, "Succeeded",tenant1)])
+        gene2 = src.Gene(src.Node(2), [src.Task(4, "Pending",tenant3), src.Task(6, "Succeeded",tenant2), src.Task(2, "Succeeded",tenant1)])
+        gene3 = src.Gene(src.Node(3), [src.Task(7, "Pending",tenant2), src.Task(3, "Succeeded",tenant1), src.Task(8, "Succeeded",tenant3)])
+        gene4 = src.Gene(src.Node(1), [src.Task(1, "Succeeded",tenant1), src.Task(0, "Pending",tenant1)])
         
         test1 = src.Genotype([gene1, gene2, gene3])
         test2 = src.Genotype([gene4, gene2, gene3])
@@ -156,9 +248,9 @@ class Testfitness:
         tenant1 = src.Tenant("paul")
         tenant2 = src.Tenant("peter")
         tenant3 = src.Tenant("max")
-        gene1 = src.Gene(src.Node(1), [src.Task(0, "Pending",tenant1), src.Task(1, "Scheduled",tenant1)])
-        gene2 = src.Gene(src.Node(2), [src.Task(4, "Pending",tenant3), src.Task(6, "Scheduled",tenant2), src.Task(2, "Scheduled",tenant1)])
-        gene3 = src.Gene(src.Node(3), [src.Task(7, "Pending",tenant2), src.Task(3, "Scheduled",tenant1), src.Task(8, "Scheduled",tenant3)])
+        gene1 = src.Gene(src.Node(1), [src.Task(0, "Pending",tenant1), src.Task(1, "Succeeded",tenant1)])
+        gene2 = src.Gene(src.Node(2), [src.Task(4, "Pending",tenant3), src.Task(6, "Succeeded",tenant2), src.Task(2, "Succeeded",tenant1)])
+        gene3 = src.Gene(src.Node(3), [src.Task(7, "Pending",tenant2), src.Task(3, "Succeeded",tenant1), src.Task(8, "Succeeded",tenant3)])
 
         test = src.Genotype([gene1, gene2, gene3])
         #tenant1 = [sum of taskposition = 8, number of tasks = 4]
@@ -175,9 +267,9 @@ class Testfitness:
         #error 0.9259259259259259
         assert src.fairness(test) == 0.9259259259259259
 
-        fairgene1 = src.Gene(src.Node(1), [src.Task(0, "Pending",tenant1), src.Task(1, "Scheduled",tenant2), src.Task(2, "Scheduled",tenant3)])
-        fairgene2 = src.Gene(src.Node(1), [src.Task(0, "Pending",tenant3), src.Task(1, "Scheduled",tenant1), src.Task(2, "Scheduled",tenant2)])
-        fairgene3 = src.Gene(src.Node(1), [src.Task(0, "Pending",tenant2), src.Task(1, "Scheduled",tenant3), src.Task(2, "Scheduled",tenant1)])
+        fairgene1 = src.Gene(src.Node(1), [src.Task(0, "Pending",tenant1), src.Task(1, "Succeeded",tenant2), src.Task(2, "Succeeded",tenant3)])
+        fairgene2 = src.Gene(src.Node(1), [src.Task(0, "Pending",tenant3), src.Task(1, "Succeeded",tenant1), src.Task(2, "Succeeded",tenant2)])
+        fairgene3 = src.Gene(src.Node(1), [src.Task(0, "Pending",tenant2), src.Task(1, "Succeeded",tenant3), src.Task(2, "Succeeded",tenant1)])
 
         fairtest = src.Genotype([fairgene1, fairgene2, fairgene3])
         assert src.fairness(fairtest) == 1.0
@@ -186,9 +278,9 @@ class Testfitness:
         tenant1 = src.Tenant("paul")
         tenant2 = src.Tenant("peter")
         tenant3 = src.Tenant("max")
-        gene1 = src.Gene(src.Node(1), [src.Task(0, "Pending",tenant1), src.Task(1, "Scheduled",tenant1)])
-        gene2 = src.Gene(src.Node(2), [src.Task(4, "Pending",tenant3), src.Task(6, "Scheduled",tenant2), src.Task(2, "Scheduled",tenant1)])
-        gene3 = src.Gene(src.Node(3), [src.Task(7, "Pending",tenant2), src.Task(3, "Scheduled",tenant1), src.Task(8, "Scheduled",tenant3)])
+        gene1 = src.Gene(src.Node(1), [src.Task(0, "Pending",tenant1), src.Task(1, "Succeeded",tenant1)])
+        gene2 = src.Gene(src.Node(2), [src.Task(4, "Pending",tenant3), src.Task(6, "Succeeded",tenant2), src.Task(2, "Succeeded",tenant1)])
+        gene3 = src.Gene(src.Node(3), [src.Task(7, "Pending",tenant2), src.Task(3, "Succeeded",tenant1), src.Task(8, "Succeeded",tenant3)])
         test = src.Genotype([gene1, gene2, gene3])
 
         #noramlized_resources_per_tenant is number nodes divided tasks by tenant
@@ -200,32 +292,123 @@ class Testfitness:
 
 class TestInit:
     def test_init(self):
-        src.current_resources.resource_array.extend([src.Node(0), src.Node(1), src.Node(2)])
+        src.current_resources.extend([src.Node(0), src.Node(1), src.Node(2)])
         poolsize = 10
         src.init(poolsize)
         assert(all(isinstance(element, src.Genotype) for element in src.population.population_array))
         assert(len(src.population.population_array)==poolsize)
 
-class TestAddAndDelTask:
+class TestUpdateBatch:    
+    def test_update_batch(self):
+        setup = multiprocessing.Process(target=setup_update_batch)
+        setup.start()
+        sleep(10)
+        assert(src.n_new_tasks.value == 2)
+        assert(src.new_tasks.qsize() == 2)
+        assert(src.n_old_tasks.value == 1)
+        assert(src.old_tasks.qsize() == 1)
+        #should be false there are new tasks in the new_tasks
+        assert(not src.no_task.value)
+
+        #empty out the new_task and old_task
+        rec_task_counter = 0
+        while True:
+            with src.n_new_tasks.get_lock():
+                #done
+                if rec_task_counter == src.n_new_tasks.value:
+                    break
+            try:
+                task = src.new_tasks.get_nowait()
+            except Empty:
+                continue
+            rec_task_counter += 1
+        with src.n_new_tasks.get_lock():
+            src.n_new_tasks.value = 0
+        
+        rec_task_counter = 0
+        while True:
+            with src.n_old_tasks.get_lock():
+                #done
+                if rec_task_counter == src.n_old_tasks.value:
+                    break
+            try:
+                task = src.old_tasks.get_nowait()
+            except Empty:
+                continue
+            rec_task_counter += 1  
+        
+        with src.n_old_tasks.get_lock():
+            src.n_old_tasks.value = 0
+
+        sleep(5)
+        assert(src.n_new_tasks.value == 0)
+        assert(src.new_tasks.qsize() == 0)
+        assert(src.n_old_tasks.value == 0)
+        assert(src.old_tasks.qsize() == 0)
+        with src.thread_lock_update_q:
+            assert(len(src.update_q) == 0)
+        #should be false there are new tasks in the new_tasks
+        assert(not src.no_task.value)
+        with src.no_task.get_lock():
+            src.no_task.value = True
+        
+
+class TestAddAndDelTaskNode:
+    def test_add_node(self):
+        testNode1 = src.Node(3)
+        testNode2 = src.Node(6)
+        src.current_resources = []
+        setup1 = multiprocessing.Process(target=setup_update_current_resources)
+        setup1.start()
+
+        src.node_update.wait()
+        assert(not src.current_resources)
+
+        src.update_current_resources()
+
+        assert(testNode1 in src.current_resources)
+        assert(testNode2 in src.current_resources)
+
+        setup2 = multiprocessing.Process(target=setup_update_current_resources_2)
+        setup2.start()
+
+        src.node_update.wait()
+
+        assert(testNode1 in src.current_resources)
+        assert(testNode2 in src.current_resources)
+
+        src.update_current_resources()
+
+        assert(testNode1 not in src.current_resources)
+        assert(testNode2 in src.current_resources)
+
     def test_add_tasks_to_genetype(self):
         #test every thing is added and if everything is added only once
-        poolsize =10
+        poolsize = 10
         tenant1 = src.Tenant("paul")
         tenant2 = src.Tenant("peter")
         tenant3 = src.Tenant("max")
         genes = [gene for genotypes in src.population.population_array for gene in genotypes._gene_array]
+        toadd = [src.Task(0, "Pending",tenant1), src.Task(1, "Succeeded",tenant1), src.Task(4, "Pending",tenant3), src.Task(6, "Succeeded",tenant2), src.Task(2, "Succeeded",tenant1)]
+        
         #assert they are empty before
         for gene in genes:
             assert(all(not tasksqueue for tasksqueue in gene.tasksqueue))
         #should be true if there are no tasks yet in the taskqueues
-        assert(src.no_task.value)
+        with src.no_task.get_lock():
+            assert(src.no_task.value)
+        
+        setup1 = multiprocessing.Process(target=setup_add_tasks1)
+        setup1.start()
 
-        toadd = [src.Task(0, "Pending",tenant1), src.Task(1, "Scheduled",tenant1), src.Task(4, "Pending",tenant3), src.Task(6, "Scheduled",tenant2), src.Task(2, "Scheduled",tenant1)]
-        with src.process_lock_new_tasks:
-            for task in toadd:
-                src.new_tasks.append(task)
-            assert(len(src.new_tasks) == 5)
-            src.add_tasks_to_genotype()
+        while src.no_task.value:
+            continue
+        src.add_tasks_to_genotype()
+        setup1.join()
+        setup1.close()
+        with src.no_task.get_lock():
+            src.no_task.value = True
+
         toadd = toadd *poolsize
         for gene in genes:
             for task in gene.tasksqueue:
@@ -233,14 +416,21 @@ class TestAddAndDelTask:
                 toadd.remove(task)
         assert(len(toadd) == 0)
 
-        toadd = [src.Task(0, "Pending",tenant1), src.Task(1, "Scheduled",tenant1), src.Task(4, "Pending",tenant3), src.Task(6, "Scheduled",tenant2), src.Task(2, "Scheduled",tenant1)]
-        toadd2 = [src.Task(7, "Pending",tenant2), src.Task(3, "Scheduled",tenant1), src.Task(8, "Scheduled",tenant3)]
+        toadd = [src.Task(0, "Pending",tenant1), src.Task(1, "Succeeded",tenant1), src.Task(4, "Pending",tenant3), src.Task(6, "Succeeded",tenant2), src.Task(2, "Succeeded",tenant1)]
+        toadd2 = [src.Task(7, "Pending",tenant2), src.Task(3, "Succeeded",tenant1), src.Task(8, "Succeeded",tenant3)]
         
-        with src.process_lock_new_tasks:
-            for task in toadd2:
-                src.new_tasks.append(task)
-            assert(len(src.new_tasks) == 3)
-            src.add_tasks_to_genotype()
+        setup2 = multiprocessing.Process(target=setup_add_tasks2)
+        setup2.start()
+
+        while src.no_task.value:
+            continue
+        with src.n_new_tasks.get_lock():
+            assert(src.n_new_tasks.value == 3)
+        src.add_tasks_to_genotype()
+        setup2.join()
+        setup2.close()
+        with src.no_task.get_lock():
+            src.no_task.value == True
 
         toadd = toadd *poolsize
         toadd2 = toadd2 *poolsize
@@ -251,8 +441,8 @@ class TestAddAndDelTask:
                     toadd.remove(task)
                 elif task in toadd2:
                     toadd2.remove(task)
-        assert(not toadd)
-        assert(not toadd2)
+        assert(len(toadd) == 0) 
+        assert(len(toadd2) == 0)
 
         assert(len([tasks for gene in genes for tasks in gene.tasksqueue])==8*poolsize)
 
@@ -271,16 +461,15 @@ class TestAddAndDelTask:
             src.no_task.value = False
             assert(not src.no_task.value)
 
-        #[src.Task(0, "Pending",tenant1), src.Task(1, "Scheduled",tenant1), src.Task(4, "Pending",tenant3), src.Task(6, "Scheduled",tenant2), src.Task(2, "Scheduled",tenant1)]
-        todel = [src.Task(0, "Pending",tenant1), src.Task(4, "Pending",tenant3), src.Task(2, "Scheduled",tenant1)]
-        kept = [src.Task(1, "Scheduled",tenant1), src.Task(6, "Scheduled",tenant2), src.Task(7, "Pending",tenant2), src.Task(3, "Scheduled",tenant1), src.Task(8, "Scheduled",tenant3)]
+        #[src.Task(0, "Pending",tenant1), src.Task(1, "Succeeded",tenant1), src.Task(4, "Pending",tenant3), src.Task(6, "Succeeded",tenant2), src.Task(2, "Succeeded",tenant1)]
+        todel = [src.Task(0, "Pending",tenant1), src.Task(4, "Pending",tenant3), src.Task(2, "Succeeded",tenant1)]
+        kept = [src.Task(1, "Succeeded",tenant1), src.Task(6, "Succeeded",tenant2), src.Task(7, "Pending",tenant2), src.Task(3, "Succeeded",tenant1), src.Task(8, "Succeeded",tenant3)]
         
-        with src.process_lock_old_tasks:
-            for task in todel:
-                src.old_tasks.append(task)
-            assert(len(src.old_tasks) == 3)
-            src.del_tasks_from_genotype()
-        
+        setup1 = multiprocessing.Process(target=setup_del_tasks1)
+        setup1.start()
+        setup1.join()
+        src.del_tasks_from_genotype()
+        setup1.close()        
         assert(not src.no_task.value)
 
         assert(len([tasks for gene in genes for tasks in gene.tasksqueue])==5*poolsize)
@@ -289,15 +478,15 @@ class TestAddAndDelTask:
                 assert(task in kept)
                 assert(task not in todel)
 
-        todel = [src.Task(1, "Scheduled",tenant1), src.Task(6, "Scheduled",tenant2), src.Task(7, "Pending",tenant2)]
-        kept = [src.Task(3, "Scheduled",tenant1), src.Task(8, "Scheduled",tenant3)]
+        todel = [src.Task(1, "Succeeded",tenant1), src.Task(6, "Succeeded",tenant2), src.Task(7, "Pending",tenant2)]
+        kept = [src.Task(3, "Succeeded",tenant1), src.Task(8, "Succeeded",tenant3)]
         
         
-        with src.process_lock_old_tasks:
-            for task in todel:
-                src.old_tasks.append(task)
-            assert(len(src.old_tasks) == 3)
-            src.del_tasks_from_genotype()
+        setup2 = multiprocessing.Process(target=setup_del_tasks2)
+        setup2.start()
+        setup2.join()
+        src.del_tasks_from_genotype()
+        setup2.close()
         assert(not src.no_task.value)
         
         assert(len([tasks for gene in genes for tasks in gene.tasksqueue])==2*poolsize)
@@ -307,51 +496,150 @@ class TestAddAndDelTask:
                 assert(task not in todel)
         
         
-        with src.process_lock_old_tasks:
-            for task in kept:
-                src.old_tasks.append(task)
-            assert(len(src.old_tasks) == 2)
-            src.del_tasks_from_genotype()
+        setup3 = multiprocessing.Process(target=setup_del_tasks3)
+        setup3.start()
+        setup3.join()
+        src.del_tasks_from_genotype()
+        setup3.join()
 
         for gene in genes:
             assert(all(not tasksqueue for tasksqueue in gene.tasksqueue))
 
         #should be true since we delted all tasks and the taskquesues should be empty
         assert(src.no_task.value)
-            
-class TestUpdateBatch:
-    def test_update_batch(self):
-        dic1 = {
-            'id': 0,
-            'status': 'Pending',
-            'tenant': 'Paul'
-        }
-        dic2 = {
-            'id': 2,
-            'status': 'Scheduled',
-            'tenant': 'Peter'
-        }
-        dic3 = {
-            'id': 1,
-            'status': 'Pending',
-            'tenant': 'Max'
-        }
-        with src.thread_lock_update_q:
-            src.update_q.append(dic1)
-            src.update_q.append(dic2)
-            src.update_q.append(dic3)
-            src.tasks_arrived.set()
-        src.update_batch()
-        
-        with src.process_lock_new_tasks:
-            assert(len(src.new_tasks) == 2)
-        with src.process_lock_old_tasks:
-            assert(len(src.old_tasks) == 1)
-        with src.thread_lock_update_q:
-            assert(len(src.update_q) == 0)
-        #should be false there are new tasks in the new_tasks
-        assert(not src.no_task.value)
 
+class TestMutation:
+    def test_coefficient1(self):
+
+        src.mutation_coefficient1 = 1
+        src.mutation_coefficient2 = 0
+        src.mutation_coefficient3 = 0
+        tenant1 = src.Tenant("paul")
+        tenant2 = src.Tenant("peter")
+        tenant3 = src.Tenant("max")
+        gene0 = src.Gene(src.Node(1), [src.Task(0, "Pending",tenant1), src.Task(1, "Succeeded",tenant1)])
+        gene1 = src.Gene(src.Node(2), [src.Task(4, "Pending",tenant3), src.Task(6, "Succeeded",tenant2), src.Task(2, "Succeeded",tenant1)])
+        gene2 = src.Gene(src.Node(3), [src.Task(7, "Pending",tenant2), src.Task(3, "Succeeded",tenant1), src.Task(8, "Succeeded",tenant3)])
+        test = src.Genotype([gene0, gene1, gene2])
+        output = [copy.deepcopy(test)]
+
+        
+        src.mutation(output)
+
+        if output[0]._gene_array[0] == gene0:
+            #the other must be switched
+            assert(output[0]._gene_array[1].tasksqueue == gene2.tasksqueue )
+            assert(output[0]._gene_array[2].tasksqueue == gene1.tasksqueue )
+        elif output[0]._gene_array[1] == gene1:
+            #the other must be switched
+            assert(output[0]._gene_array[0].tasksqueue == gene2.tasksqueue )
+            assert(output[0]._gene_array[2].tasksqueue == gene0.tasksqueue )
+        else:
+            assert(output[0]._gene_array[2] == gene2 )
+            assert(output[0]._gene_array[0].tasksqueue == gene1.tasksqueue )
+            assert(output[0]._gene_array[1].tasksqueue == gene0.tasksqueue )
+    
+    def test_coefficient2(self):
+        src.mutation_coefficient1 = 1
+        src.mutation_coefficient2 = 0
+        src.mutation_coefficient3 = 0
+        tenant1 = src.Tenant("paul")
+        tenant2 = src.Tenant("peter")
+        tenant3 = src.Tenant("max")
+        gene0 = src.Gene(src.Node(1), [src.Task(0, "Pending",tenant1), src.Task(1, "Succeeded",tenant1)])
+        gene1 = src.Gene(src.Node(2), [src.Task(4, "Pending",tenant3), src.Task(6, "Succeeded",tenant2), src.Task(2, "Succeeded",tenant1)])
+        gene2 = src.Gene(src.Node(3), [src.Task(7, "Pending",tenant2), src.Task(3, "Succeeded",tenant1), src.Task(8, "Succeeded",tenant3)])
+        test = src.Genotype([gene0, gene1, gene2])
+        output = [copy.deepcopy(test)]
+
+        src.mutation_coefficient1 = 0
+        src.mutation_coefficient2 = 1 
+        src.mutation_coefficient3 = 0
+        src.mutation(output)
+
+        #could be a task is taken from the first gene and then later taken from another gene and then added 
+        #back to the first changing nothing
+        missing = []
+        added = []
+        output[0]._gene_array[0].tasksqueue
+        idx = 0
+
+        for task in output[0]._gene_array[0].tasksqueue:
+            if task not in gene0.tasksqueue and task in gene1.tasksqueue + gene2.tasksqueue:
+                added.append(task)
+            elif task not in gene0.tasksqueue and task not in gene1.tasksqueue + gene2.tasksqueue:
+                assert(not task)
+            else:
+                continue
+        for task in gene0.tasksqueue:
+            if task not in output[0]._gene_array[0].tasksqueue:
+                missing.append(task)
+    # -----------------------------------------------------------
+
+        for task in output[0]._gene_array[1].tasksqueue:
+            if task not in gene1.tasksqueue and task in gene0.tasksqueue + gene2.tasksqueue:
+                added.append(task)
+            elif task not in gene1.tasksqueue and task not in gene0.tasksqueue + gene2.tasksqueue:
+                assert(not task)
+            else:
+                continue
+
+        for task in gene1.tasksqueue:
+            if task not in output[0]._gene_array[1].tasksqueue:
+                missing.append(task)
+    
+    # -----------------------------------------------------------
+
+        for task in output[0]._gene_array[2].tasksqueue:
+            if task not in gene2.tasksqueue and task in gene0.tasksqueue + gene1.tasksqueue:
+                added.append(task)
+            elif task not in gene2.tasksqueue and task not in gene0.tasksqueue + gene1.tasksqueue:
+                assert(not task)
+            else:
+                continue
+
+        for task in gene2.tasksqueue:
+            if task not in output[0]._gene_array[2].tasksqueue:
+                missing.append(task)
+
+
+        assert(len(missing) == len(added))
+        assert(len(missing) <= len(output[0]._gene_array))
+
+        for task in missing:
+            assert(task in added)
+
+    def test_coefficient3(self):
+        src.mutation_coefficient1 = 1
+        src.mutation_coefficient2 = 0
+        src.mutation_coefficient3 = 0
+        tenant1 = src.Tenant("paul")
+        tenant2 = src.Tenant("peter")
+        tenant3 = src.Tenant("max")
+        gene0 = src.Gene(src.Node(1), [src.Task(0, "Pending",tenant1), src.Task(1, "Succeeded",tenant1)])
+        gene1 = src.Gene(src.Node(2), [src.Task(4, "Pending",tenant3), src.Task(6, "Succeeded",tenant2), src.Task(2, "Succeeded",tenant1)])
+        gene2 = src.Gene(src.Node(3), [src.Task(7, "Pending",tenant2), src.Task(3, "Succeeded",tenant1), src.Task(8, "Succeeded",tenant3)])
+        test = src.Genotype([gene0, gene1, gene2])
+        output = [copy.deepcopy(test)]
+        print(f"this is the original : {test}")
+
+        src.mutation_coefficient1 = 0
+        src.mutation_coefficient2 = 0
+        src.mutation_coefficient3 = 1
+        src.mutation(output)
+        print(f"this is the third mutation {output[0]}")
+
+        all_tasks = [task for gene in test._gene_array for task in gene.tasksqueue]
+        print(f"this is all tasks {all_tasks}")
+
+        for gene in output[0]._gene_array:
+            for task in gene.tasksqueue:
+                assert(task in all_tasks)
+                all_tasks.remove(task)
+        assert(not all_tasks)
+
+
+            
 
 class TestSelection:
     #cant test internal functions so only test the src.selection
@@ -430,13 +718,13 @@ class TestParticallyMappedCrossover:
         tenant1 = src.Tenant("paul")
         tenant2 = src.Tenant("peter")
         tenant3 = src.Tenant("max")
-        gene1 = src.Gene(src.Node(1), [src.Task(0, "Pending",tenant1), src.Task(1, "Scheduled",tenant1)])
-        gene2 = src.Gene(src.Node(2), [src.Task(4, "Pending",tenant3), src.Task(6, "Scheduled",tenant2), src.Task(2, "Scheduled",tenant1)])
-        gene3 = src.Gene(src.Node(3), [src.Task(7, "Pending",tenant2), src.Task(3, "Scheduled",tenant1), src.Task(5, "Scheduled",tenant3)])
+        gene1 = src.Gene(src.Node(1), [src.Task(0, "Pending",tenant1), src.Task(1, "Succeeded",tenant1)])
+        gene2 = src.Gene(src.Node(2), [src.Task(4, "Pending",tenant3), src.Task(6, "Succeeded",tenant2), src.Task(2, "Succeeded",tenant1)])
+        gene3 = src.Gene(src.Node(3), [src.Task(7, "Pending",tenant2), src.Task(3, "Succeeded",tenant1), src.Task(5, "Succeeded",tenant3)])
 
-        gene4 = src.Gene(src.Node(1), [src.Task(2, "Pending",tenant1), src.Task(4, "Scheduled",tenant3), src.Task(7, "Pending",tenant2)])
+        gene4 = src.Gene(src.Node(1), [src.Task(2, "Pending",tenant1), src.Task(4, "Succeeded",tenant3), src.Task(7, "Pending",tenant2)])
         gene5 = src.Gene(src.Node(2), [src.Task(3, "Pending",tenant1)])
-        gene6 = src.Gene(src.Node(3), [src.Task(1, "Pending",tenant1), src.Task(0, "Scheduled",tenant1), src.Task(5, "Scheduled",tenant3),src.Task(6, "Pending",tenant2)])
+        gene6 = src.Gene(src.Node(3), [src.Task(1, "Pending",tenant1), src.Task(0, "Succeeded",tenant1), src.Task(5, "Succeeded",tenant3),src.Task(6, "Pending",tenant2)])
         
         genotype1 = src.Genotype([gene1, gene2, gene3])
         genotype2 = src.Genotype([gene4, gene5, gene6])
@@ -448,16 +736,16 @@ class TestParticallyMappedCrossover:
 
         
         #there is two versions one where the chosen parent is parent 1
-        #leftover: src.Task(1, "Scheduled",tenant1), src.Task(4, "Scheduled",tenant3) src.Task(7, "Pending",tenant2) src.Task(2, "Scheduled",tenant1)
+        #leftover: src.Task(1, "Succeeded",tenant1), src.Task(4, "Succeeded",tenant3) src.Task(7, "Pending",tenant2) src.Task(2, "Succeeded",tenant1)
         # test = src.Gene(src.Node(1), [src.Task(0, "Pending",tenant1), src.Task(2, "Pending",tenant1)])
-        #        src.Gene(src.Node(2), [src.Task(4, "Pending",tenant3), src.Task(3, "Pending",tenant1), src.Task(6, "Scheduled",tenant2)])
-        #        src.Gene(src.Node(3), [src.Task(7, "Pending",tenant2), src.Task(1, "Pending",tenant1), src.Task(5, "Scheduled",tenant3)])
+        #        src.Gene(src.Node(2), [src.Task(4, "Pending",tenant3), src.Task(3, "Pending",tenant1), src.Task(6, "Succeeded",tenant2)])
+        #        src.Gene(src.Node(3), [src.Task(7, "Pending",tenant2), src.Task(1, "Pending",tenant1), src.Task(5, "Succeeded",tenant3)])
 
         #and one version where the chosen parent is parent 2
-        #leftover: src.Task(1, "Scheduled",tenant1), src.Task(4, "Scheduled",tenant3) src.Task(7, "Pending",tenant2) src.Task(2, "Scheduled",tenant1)
+        #leftover: src.Task(1, "Succeeded",tenant1), src.Task(4, "Succeeded",tenant3) src.Task(7, "Pending",tenant2) src.Task(2, "Succeeded",tenant1)
         # test = src.Gene(src.Node(1), [src.Task(2, "Pending",tenant1), src.Task(0, "Pending",tenant1)])
-        #        src.Gene(src.Node(2), [src.Task(3, "Pending",tenant1), src.Task(4, "Pending",tenant3), src.Task(6, "Scheduled",tenant2)])
-        #        src.Gene(src.Node(3), [src.Task(1, "Pending",tenant1), src.Task(7, "Pending",tenant2), src.Task(5, "Scheduled",tenant3)])
+        #        src.Gene(src.Node(2), [src.Task(3, "Pending",tenant1), src.Task(4, "Pending",tenant3), src.Task(6, "Succeeded",tenant2)])
+        #        src.Gene(src.Node(3), [src.Task(1, "Pending",tenant1), src.Task(7, "Pending",tenant2), src.Task(5, "Succeeded",tenant3)])
         assert(test._gene_array[0].resource.id == 1)
         assert(len(test._gene_array[0].tasksqueue) == 2)
         assert(test._gene_array[0].tasksqueue[0].id in [0,2])
@@ -480,12 +768,12 @@ class TestParticallyMappedCrossover:
         tenant2 = src.Tenant("peter")
         tenant3 = src.Tenant("max")
         gene1 = src.Gene(src.Node(1), [])
-        gene2 = src.Gene(src.Node(2), [src.Task(0, "Pending",tenant1), src.Task(4, "Pending",tenant3), src.Task(6, "Scheduled",tenant2), src.Task(2, "Scheduled",tenant1)])
-        gene3 = src.Gene(src.Node(3), [src.Task(1, "Scheduled",tenant1), src.Task(7, "Pending",tenant2), src.Task(3, "Scheduled",tenant1), src.Task(5, "Scheduled",tenant3)])
+        gene2 = src.Gene(src.Node(2), [src.Task(0, "Pending",tenant1), src.Task(4, "Pending",tenant3), src.Task(6, "Succeeded",tenant2), src.Task(2, "Succeeded",tenant1)])
+        gene3 = src.Gene(src.Node(3), [src.Task(1, "Succeeded",tenant1), src.Task(7, "Pending",tenant2), src.Task(3, "Succeeded",tenant1), src.Task(5, "Succeeded",tenant3)])
 
-        gene4 = src.Gene(src.Node(1), [src.Task(2, "Pending",tenant1), src.Task(4, "Scheduled",tenant3), src.Task(7, "Pending",tenant2)])
+        gene4 = src.Gene(src.Node(1), [src.Task(2, "Pending",tenant1), src.Task(4, "Succeeded",tenant3), src.Task(7, "Pending",tenant2)])
         gene5 = src.Gene(src.Node(2), [src.Task(3, "Pending",tenant1)])
-        gene6 = src.Gene(src.Node(3), [src.Task(1, "Pending",tenant1), src.Task(0, "Scheduled",tenant1), src.Task(5, "Scheduled",tenant3), src.Task(6, "Pending",tenant2)])
+        gene6 = src.Gene(src.Node(3), [src.Task(1, "Pending",tenant1), src.Task(0, "Succeeded",tenant1), src.Task(5, "Succeeded",tenant3), src.Task(6, "Pending",tenant2)])
         
         genotype1 = src.Genotype([gene1, gene2, gene3])
         genotype2 = src.Genotype([gene4, gene5, gene6])
