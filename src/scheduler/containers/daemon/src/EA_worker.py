@@ -150,10 +150,10 @@ class Gene:
         self.tasksqueue = tasksqueue
     
     def __str__(self):
-        return f'genome({self.tasksqueue} on {self.resource})'
+        return f'gene({self.tasksqueue} on {self.resource})'
     
     def __repr__(self): 
-        return f'genome({self.tasksqueue} on {self.resource})'
+        return f'gene({self.tasksqueue} on {self.resource})'
     
     def __eq__(self, other):
         if isinstance(other, Gene):
@@ -404,7 +404,6 @@ def init(size):
 
 #iterate n times. N being equal to size
 #M number of resources N population size means O(M)+O(N*M) is better if M < N
-    print("get into the init call", flush=True)
     rec_resource_counter = 0
     while True:
         with n_init.get_lock():
@@ -441,6 +440,7 @@ def update_current_resources():
     global resources_queue
     global n_node
     global current_resources
+    global population
     rec_node_counter = 0
 
     while True:
@@ -455,8 +455,19 @@ def update_current_resources():
         rec_node_counter += 1 
         if operation == "add":
             current_resources.append(node)
+            for genotype in population.population_array:
+                genotype._gene_array.append(Gene(node, []))
         elif operation == "delete":
             current_resources.remove(node)
+            for genotype in population.population_array:
+                to_remove_idx = None
+                for idx, gene in  enumerate(genotype._gene_array):
+                    if gene.resource == node:
+                        to_remove_idx = idx
+                        valid_new_gene_idx = [i for i in range(len(genotype._gene_array)) if i != idx]
+                        for task in gene.tasksqueue:
+                            genotype._gene_array[random.choice(valid_new_gene_idx)].tasksqueue.append(task)
+                genotype._gene_array.pop(to_remove_idx)
 
 """
 input:  
@@ -470,7 +481,6 @@ description:
 """
 def add_tasks_to_genotype():
     global population
-    global current_resources
     global new_tasks
 
     rec_task_counter = 0
@@ -488,7 +498,7 @@ def add_tasks_to_genotype():
     
     #iterate n times. N being equal to poolsize
         for genotype in population.population_array:
-            resource_id = random.randint(0, len(current_resources) -1 )# including the last number so minus one for index
+            resource_id = random.randint(0, len(genotype._gene_array) -1 )# including the last number so minus one for index
             genotype._gene_array[resource_id].tasksqueue.append(task)
     with n_new_tasks.get_lock():
         n_new_tasks.value = 0
@@ -862,6 +872,9 @@ def epoch():
             continue
         if node_update.is_set():
             update_current_resources()
+        
+        if not current_resources:
+            continue
 
         #add tasks to genotype dont need atomicity here if something is put into new_tasks or old_tasks from the batch update while this runs do it next epocj rather than lock
         add_tasks_to_genotype()
@@ -889,7 +902,6 @@ def epoch():
 
         if new_best:
             new_best = False
-            print(f"new best {best_solution}", flush=True)
             worker_thread = threading.Thread(target=update_solution, args=[best_solution])
             worker_thread.start()
 
@@ -905,15 +917,12 @@ def epoch():
 def update_solution(solution):
     url = f"http://{main_service}/update-solution"
     json_obj = {"fitness": solution.fitnessvalue}
-    print(f"new best in the update_solution {solution}", flush=True)
     for gene in solution._gene_array:
         json_obj[gene.resource.id] = []
         for task in gene.tasksqueue:
             json_obj[gene.resource.id].append(task.id)
     response = requests.post(url, json = json_obj)
     if response.status_code < 400:
-        print(f"Request successful with status code: {response.status_code}")
-        print(response.text)
         return response
     else:
         print(f"Request failed with status code {response.status_code}")
@@ -988,10 +997,8 @@ def node_change():
     global resources_queue
     global node_update
     global n_node
-    print("node change called", flush=True)
     update = request.get_json()
-    print(f"what i put in the queue {[Node(int(list(update)[0])), update[list(update)[1]]]}", flush=True)
-    resources_queue.put_nowait([Node(int(list(update)[0])), update[list(update)[1]]])
+    resources_queue.put_nowait([Node(int(update[list(update)[0]])), update[list(update)[1]]])
     with n_node.get_lock():
         n_node.value += 1
     node_update.set()

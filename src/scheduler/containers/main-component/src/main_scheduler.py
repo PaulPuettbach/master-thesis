@@ -54,12 +54,12 @@ def watch_node_conditions():
             with thread_lock:
                 node_id +=1
                 resource_dic[node_id] = node_name
-            node_change({node_id: node_name}, "add")
+            node_change(node_id, "add")
 
         if not eligable and node_name in resource_dic.values():
             with thread_lock:
                 resource_dic = {key:val for key, val in resource_dic.items() if val != node_name}
-            node_change({node_id: node_name}, "delete")
+            node_change(node_id, "delete")
 
 """Logic"""
 def nodes_available():
@@ -85,7 +85,6 @@ def nodes_available():
 #node is the name of the node n.metadata.name
 
 def schedule(meta, node, namespace="spark-namespace"):
-    print("enter schedule", flush=True)
         
     target=client.V1ObjectReference()
     target.kind="Node"
@@ -115,14 +114,14 @@ def watch_pod():
             pod_dic[pod_id] = event['object'].metadata
             pod_id += 1
         if event['object'].status.phase == "Succeeded" and event['object'].spec.scheduler_name == "custom-scheduler":
-            print(f"got a pod with status succeded ")
-            pod_id = list(pod_dic.keys())[list(pod_dic.values()).index(event['object'].metadata)]
+            for pod_meta in list(pod_dic.values()):
+                if pod_meta.name == event['object'].metadata.name:
+                    pod_id = list(pod_dic.keys())[list(pod_dic.values()).index(pod_meta)]
             update_worker(pod_id, tenantname, "Succeeded")
 
 def schedule_on_node(resource_id, ids):
     global resource_dic
     global pod_dic
-    print("enter schedule on node", flush=True)
     for id in ids:
         with thread_lock:
             schedule(pod_dic[id], resource_dic[int(resource_id)])
@@ -138,7 +137,6 @@ def health():
 def update():
     global best_fitness
     update = request.get_json()
-    print(f"update = {update}", flush = True)
     if update[list(update)[0]] < best_fitness:
         return
     else:
@@ -166,19 +164,15 @@ def update():
         
 def init_worker():
     url = f"http://{worker_service}/init"
-    print(f"this is the url that it is pinging {url}")
     global node_id
     global resource_dic
     count = 0
     for count, node in enumerate(nodes_available()):
         with thread_lock:
             resource_dic[count + node_id] = node
-    print(f"this is the resource dic in the init {resource_dic}", flush=True)
     node_id = count + node_id
     response = requests.post(url, json = resource_dic)
     if response.status_code < 400:
-        print(f"Request successful with status code: {response.status_code}")
-        print(response.text)
         return response
     else:
         print(f"Request failed with status code {response.status_code}")
@@ -188,20 +182,16 @@ def update_worker(id, tenant, status):
     json_obj = {"id": id, "tenant": tenant, "status": status}
     response = requests.post(url, json = json_obj)
     if response.status_code < 400:
-        print("Request successful")
-        print(response.text)
         return response
     else:
         print(f"Request failed with status code {response.status_code}")
 
 def node_change(node, operation):
     url = f"http://{worker_service}/node-change"
-    json_obj = node
-    json_obj += {"operation": operation}
+    json_obj = {"node_id" : node}
+    json_obj["operation"] = operation
     response = requests.post(url, json = json_obj)
     if response.status_code < 400:
-        print("Request successful")
-        print(response.text)
         return response
     else:
         print(f"Request failed with status code {response.status_code}")

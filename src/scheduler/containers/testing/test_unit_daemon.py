@@ -39,14 +39,15 @@ def setup_update_current_resources():
     src.resources_queue.put_nowait((testNode2, "add"))
     with src.n_node.get_lock():
         src.n_node.value = 2
-        print("get here", flush=True)
     src.node_update.set()
 
 def setup_update_current_resources_2():
     testNode1 = src.Node(3)
+    testNode2 = src.Node(1)
     src.resources_queue.put_nowait((testNode1, "delete"))
+    src.resources_queue.put_nowait((testNode2, "delete"))
     with src.n_node.get_lock():
-        src.n_node.value = 1
+        src.n_node.value = 2
     src.node_update.set()
 
 def setup_add_tasks1():
@@ -104,6 +105,7 @@ def setup_del_tasks3():
 
 class TestInstantiation:
     def test_tenant(self):
+        
         with pytest.raises(ValueError):
             #positive id
             invalid = src.Tenant(-2)
@@ -351,36 +353,12 @@ class TestUpdateBatch:
         assert(not src.no_task.value)
         with src.no_task.get_lock():
             src.no_task.value = True
+
+        setup.kill()
+        
         
 
 class TestAddAndDelTaskNode:
-    def test_add_node(self):
-        testNode1 = src.Node(3)
-        testNode2 = src.Node(6)
-        src.current_resources = []
-        setup1 = multiprocessing.Process(target=setup_update_current_resources)
-        setup1.start()
-
-        src.node_update.wait()
-        assert(not src.current_resources)
-
-        src.update_current_resources()
-
-        assert(testNode1 in src.current_resources)
-        assert(testNode2 in src.current_resources)
-
-        setup2 = multiprocessing.Process(target=setup_update_current_resources_2)
-        setup2.start()
-
-        src.node_update.wait()
-
-        assert(testNode1 in src.current_resources)
-        assert(testNode2 in src.current_resources)
-
-        src.update_current_resources()
-
-        assert(testNode1 not in src.current_resources)
-        assert(testNode2 in src.current_resources)
 
     def test_add_tasks_to_genetype(self):
         #test every thing is added and if everything is added only once
@@ -500,13 +478,79 @@ class TestAddAndDelTaskNode:
         setup3.start()
         setup3.join()
         src.del_tasks_from_genotype()
-        setup3.join()
+        setup3.close()
 
         for gene in genes:
             assert(all(not tasksqueue for tasksqueue in gene.tasksqueue))
 
         #should be true since we delted all tasks and the taskquesues should be empty
         assert(src.no_task.value)
+
+    def test_add_node(self):
+        testNode1 = src.Node(3)
+        testNode2 = src.Node(6)
+        tenant1 = src.Tenant("paul")
+        tenant2 = src.Tenant("peter")
+        tenant3 = src.Tenant("max")
+        nodes = [gene.resource for genotype in  src.population.population_array for gene in genotype._gene_array]
+        
+        toadd = [src.Task(0, "Pending",tenant1), src.Task(1, "Succeeded",tenant1), src.Task(4, "Pending",tenant3), src.Task(6, "Succeeded",tenant2), src.Task(2, "Succeeded",tenant1)]
+        for genotype in src.population.population_array:
+            for task in toadd:
+                genotype._gene_array[1].tasksqueue.append(task)
+        setup1 = multiprocessing.Process(target=setup_update_current_resources)
+        setup1.start()
+
+        src.node_update.wait()
+        assert(testNode1 not in src.current_resources)
+        assert(testNode2 not in src.current_resources)
+        assert(testNode1 not in nodes)
+        assert(testNode2 not in nodes)
+
+        src.update_current_resources()
+
+        nodes = [gene.resource for genotype in  src.population.population_array for gene in genotype._gene_array]
+
+
+        assert(testNode1 in src.current_resources)
+        assert(testNode2 in src.current_resources)
+        assert(nodes.count(testNode1) == len(src.population.population_array))
+        assert(nodes.count(testNode2) == len(src.population.population_array))
+
+        setup1.join()
+        setup1.close()
+
+        setup2 = multiprocessing.Process(target=setup_update_current_resources_2)
+        setup2.start()
+
+        src.node_update.wait()
+
+        assert(testNode1 in src.current_resources)
+        assert(testNode2 in src.current_resources)
+        assert(nodes.count(testNode1) == len(src.population.population_array))
+        assert(nodes.count(testNode2) == len(src.population.population_array))
+
+        src.update_current_resources()
+
+        nodes = [gene.resource for genotype in  src.population.population_array for gene in genotype._gene_array]
+
+        assert(testNode1 not in src.current_resources)
+        assert(testNode2 in src.current_resources)
+        assert(nodes.count(testNode1) == 0)
+        assert(nodes.count(testNode2) == len(src.population.population_array))
+        assert(nodes.count(src.Node(1)) == 0)
+        #check that the task are shifted
+        temp = toadd * len(src.population.population_array)
+        for genotype in src.population.population_array:
+            for gene in genotype._gene_array:
+                for task in gene.tasksqueue:
+                    assert(task in temp)
+                    temp.remove(task)
+
+        assert(not temp)
+
+        setup2.join()
+        setup2.close()
 
 class TestMutation:
     def test_coefficient1(self):
