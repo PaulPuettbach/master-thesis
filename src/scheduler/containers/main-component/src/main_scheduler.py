@@ -22,6 +22,8 @@ worker_service_port = os.environ['DAEMON-SERVICE-PORT']
 """global variables"""
 #make dictonary 
 node_id = 0
+pod_name_list_running = []
+pod_name_list_scheduled = []
 pod_id = 0
 pod_dic = {}
 resource_dic = {}
@@ -85,39 +87,58 @@ def nodes_available():
 #node is the name of the node n.metadata.name
 
 def schedule(meta, node, namespace="spark-namespace"):
+    global pod_name_list_scheduled
+
+    print(f"schedule called, number of pods ",flush=True)
+    if not node:
+        print("no usuable nodes", flush=True)
+        raise Exception("cannot schedule no available nodes") 
+    
+    if meta.name not in pod_name_list_scheduled:
         
-    target=client.V1ObjectReference()
-    target.kind="Node"
-    target.apiVersion="v1"
-    target.name= node
+        target=client.V1ObjectReference()
+        target.kind="Node"
+        target.apiVersion="v1"
+        target.name= node
 
-    body=client.V1Binding(target = target, metadata = meta)
+        body=client.V1Binding(target = target, metadata = meta)
 
-    #there is an issue with the kuebrentes api package it does not matter much the pod will be shceduled correctly so we just ignore it
-    # see https://github.com/kubernetes-client/python/issues/825
-    try:
-        v1.create_namespaced_binding(namespace = namespace, body = body, _preload_content=False)
-        return True
-    except:
-        return True
+        #there is an issue with the kuebrentes api package it does not matter much the pod will be shceduled correctly so we just ignore it
+        # see https://github.com/kubernetes-client/python/issues/825
+        pod_name_list_scheduled.append(meta.name)
+        try:
+            v1.create_namespaced_binding(namespace = namespace, body = body, _preload_content=False)
+            return True
+        except:
+            return True
 
 def watch_pod():
 #every new spark task comes with multiple pods they come in at the same time so we buffer for time
     w = watch.Watch()
     global pod_id
     global pod_dic
+    global pod_name_list_running
     for event in w.stream(v1.list_namespaced_pod, "spark-namespace"):
         tenantname =  [x.value for x in event['object'].spec.containers[0].env if x.name == "SPARK_USER"][0]
         if event['object'].status.phase == "Pending" and event['object'].spec.scheduler_name == "custom-scheduler":
             #update the worker nodes
-            update_worker(pod_id, tenantname, "Pending")
-            pod_dic[pod_id] = event['object'].metadata
-            pod_id += 1
-        if event['object'].status.phase == "Succeeded" and event['object'].spec.scheduler_name == "custom-scheduler":
-            for pod_meta in list(pod_dic.values()):
-                if pod_meta.name == event['object'].metadata.name:
-                    pod_id = list(pod_dic.keys())[list(pod_dic.values()).index(pod_meta)]
-            update_worker(pod_id, tenantname, "Succeeded")
+            print("potentially new pod")
+            if event['object'].metadata.name not in pod_name_list_running:
+                print(f"new pod with this name {event['object'].metadata.name}, with this id {pod_id}", flush=True)
+                update_worker(pod_id, tenantname, "Pending")
+                pod_name_list_running.append(event['object'].metadata.name)
+                meta = client.V1ObjectMeta()
+                meta.name = event['object'].metadata.name
+                meta.uid = event['object'].metadata.uid
+                pod_dic[pod_id] = meta
+                pod_id += 1
+        # if event['object'].status.phase == "Succeeded" and event['object'].spec.scheduler_name == "custom-scheduler":
+        #     if event['object'].metadata.name in pod_name_list_running:
+        #         for pod_meta in list(pod_dic.values()):
+        #             if pod_meta.name == event['object'].metadata.name:
+        #                 pod_id = list(pod_dic.keys())[list(pod_dic.values()).index(pod_meta)]
+        #         update_worker(pod_id, tenantname, "Succeeded")
+        #         pod_name_list_running.remove(pod_meta.name)
 
 def schedule_on_node(resource_id, ids):
     global resource_dic
@@ -205,9 +226,9 @@ def main():
     #     p = executor.submit(watch_pod)
     flask_thread = Thread(target=app.run, kwargs={'host': '0.0.0.0', 'port': '80'})
     flask_thread.start()
+    init_worker()
     node_thread = Thread(target=watch_node_conditions)
     node_thread.start()
-    init_worker()
     watch_pod()
 
 if __name__ == '__main__':

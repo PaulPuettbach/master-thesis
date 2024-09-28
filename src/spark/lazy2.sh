@@ -24,5 +24,3 @@ kubectl apply -f service.account.yaml
 
 echo "-----------------------------------------------------------"
 kubectl logs $(kubectl get pods --no-headers -o custom-columns=":metadata.name" -n kube-system | grep '^scheduler' | grep -v 'scheduler-daemon') -n kube-system
-echo "-----------------------------------------------------------"
-kubectl logs $(kubectl get pods --no-headers -o custom-columns=":metadata.name" -n kube-system | grep 'scheduler-daemon') -n kube-system

@@ -482,6 +482,7 @@ description:
 def add_tasks_to_genotype():
     global population
     global new_tasks
+    global best_solution
 
     rec_task_counter = 0
 
@@ -494,7 +495,8 @@ def add_tasks_to_genotype():
             task = new_tasks.get_nowait()
         except Empty:
             continue
-        rec_task_counter += 1 
+        rec_task_counter += 1
+        best_solution = Genotype([])
     
     #iterate n times. N being equal to poolsize
         for genotype in population.population_array:
@@ -517,6 +519,7 @@ description:
 def del_tasks_from_genotype():
     global population
     global old_tasks
+    global best_solution
 
     rec_task_counter = 0
 
@@ -529,7 +532,8 @@ def del_tasks_from_genotype():
             task = old_tasks.get_nowait()
         except Empty:
             continue
-        rec_task_counter += 1 
+        rec_task_counter += 1
+        best_solution = Genotype([])
 
         for gene in [gene for genotype in population.population_array for gene in genotype._gene_array]:
             try:
@@ -872,6 +876,7 @@ def epoch():
             continue
         if node_update.is_set():
             update_current_resources()
+            best_solution = Genotype([])
         
         if not current_resources:
             continue
@@ -902,6 +907,7 @@ def epoch():
 
         if new_best:
             new_best = False
+            print(f"new best found this is the number of tasks {len(population.population_array[0]._gene_array[0].tasksqueue)}", flush=True)
             worker_thread = threading.Thread(target=update_solution, args=[best_solution])
             worker_thread.start()
 
@@ -951,6 +957,7 @@ def update_batch():
             time.sleep(buffer_time)
 
         with thread_lock_update_q:
+            print(f"this is the size of the update queue {len(update_q)}", flush=True)
             temp_copy = copy.deepcopy(update_q)
             update_q = []
         counter_new = 0
@@ -985,6 +992,7 @@ def init_request():
     # first time init is called
     counter = 0
     for node_id in request.json.keys():
+        print(f"this is the id {node_id}")
         resources_queue.put_nowait((Node(int(node_id)), "add"))
         counter += 1
     with n_init.get_lock():
@@ -998,6 +1006,9 @@ def node_change():
     global node_update
     global n_node
     update = request.get_json()
+    print("node_change called")
+    print(f"this is the id {update[list(update)[0]]}")
+    print(f"this is the op {update[list(update)[1]]}")
     resources_queue.put_nowait([Node(int(update[list(update)[0]])), update[list(update)[1]]])
     with n_node.get_lock():
         n_node.value += 1

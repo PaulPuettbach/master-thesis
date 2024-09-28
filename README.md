@@ -8,6 +8,9 @@ make java code
 call javac on te file  
 take the resulting class file and any other things you need with it and call
 jar cf jar-file input-file(s)
+
+#what i changed so far
+added new role to service account
 # notes
 
 look up the inversion thing for distributions
