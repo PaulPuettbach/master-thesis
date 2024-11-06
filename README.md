@@ -8,6 +8,7 @@ make java code
 call javac on te file  
 take the resulting class file and any other things you need with it and call
 jar cf jar-file input-file(s)
+mvn clean package
 
 #what i changed so far
 added new role to service account
@@ -51,4 +52,14 @@ status:
     cpu: "4"
     memory: "16Gi"
     ephemeral-storage: "100Gi"
+
+also just wget the datasets and copy the run script and the eniter properites flder from the original repo pick 
+random interarrival time from the exponential dis at this time a random user is chosen with a random algorithm and a random graph and spark submitted
+
+more schedulers
+use minio
+at least 3
+look up continuem
+
+this has what algorithms can be used with what graphs
 
