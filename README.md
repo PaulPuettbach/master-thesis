@@ -63,3 +63,18 @@ look up continuem
 
 this has what algorithms can be used with what graphs
 
+# notes for minio
+step one
+export PATH=$PATH:$HOME/minio-binaries/
+
+step two
+mc alias set myminio https://localhost:9000 minio minio123 --insecure
+
+step three different console
+kubectl port-forward svc/myminio-hl 9000 -n minio-tenant
+
+
+option after
+mc mb -- make new bucket e.g mc mb myminio/mybucket --insecure
+
+mc cp -- copy from source to destionation e.g. mc cp --recursive --insecure /mnt/d/mystuff2/master_thesis/src/benchmark/toUpload/ myminio/mybucket/

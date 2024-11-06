@@ -68,7 +68,7 @@ spec:
               do echo "Waiting for DNS to resolve {{ include "main-helm-chart.fullname" . }}{{ .Values.daemon.service.name }}";
               sleep 2;
               done;
-              until wget -qO- http://{{ include "main-helm-chart.fullname" . }}{{ .Values.daemon.service.name }}/health;
+              until wget --spider --server-response http://{{ include "main-helm-chart.fullname" . }}{{ .Values.daemon.service.name }}/health 2>&1 | grep "200 OK";
               do echo "Waiting for HTTP service http://{{ include "main-helm-chart.fullname" . }}{{ .Values.daemon.service.name }}/health";
               sleep 5;
               done;

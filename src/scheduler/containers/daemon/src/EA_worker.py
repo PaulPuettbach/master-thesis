@@ -880,7 +880,6 @@ def epoch():
         
         if not current_resources:
             continue
-
         #add tasks to genotype dont need atomicity here if something is put into new_tasks or old_tasks from the batch update while this runs do it next epocj rather than lock
         add_tasks_to_genotype()
         #del tasks to genotype
