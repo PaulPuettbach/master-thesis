@@ -67,12 +67,11 @@ this has what algorithms can be used with what graphs
 step one
 export PATH=$PATH:$HOME/minio-binaries/
 
-step two
-mc alias set myminio https://localhost:9000 minio minio123 --insecure
-
-step three different console
+step two different console
 kubectl port-forward svc/myminio-hl 9000 -n minio-tenant
 
+step three
+mc alias set myminio https://localhost:9000 minio minio123 --insecure
 
 option after
 mc mb -- make new bucket e.g mc mb myminio/mybucket --insecure
