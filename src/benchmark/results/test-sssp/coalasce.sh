@@ -1,6 +1,6 @@
 #!/bin/bash
 
-OUTPUT_DIR="./output/output"
+OUTPUT_DIR="./output"
 COMBINED_FILE="./combined_result"
 
 
