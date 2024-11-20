@@ -686,7 +686,7 @@ def partially_mapped_crossover(parent1, parent2):
     
     leftover_tasks = []
     # one more than number of tasks in total because id start at one and constant arithmatic is more wasterful then simply having one more unused bit
-    bm = BitMap(9)
+    bm = BitMap(len([tasks for gene in parent1._gene_array for tasks in gene.tasksqueue]) +1)
     gene_idx = 0
     while gene_idx < len(parent1._gene_array):
         #in case there are no tasks in the taskqueue for the resource
@@ -885,6 +885,9 @@ def epoch():
         #del tasks to genotype
         del_tasks_from_genotype()
 
+        if no_task.value:
+            continue
+
 
         
         #fitnesscalc
@@ -906,7 +909,6 @@ def epoch():
 
         if new_best:
             new_best = False
-            print(f"new best found this is the number of tasks {len(population.population_array[0]._gene_array[0].tasksqueue)}", flush=True)
             worker_thread = threading.Thread(target=update_solution, args=[best_solution])
             worker_thread.start()
 
@@ -956,7 +958,6 @@ def update_batch():
             time.sleep(buffer_time)
 
         with thread_lock_update_q:
-            print(f"this is the size of the update queue {len(update_q)}", flush=True)
             temp_copy = copy.deepcopy(update_q)
             update_q = []
         counter_new = 0
@@ -991,7 +992,6 @@ def init_request():
     # first time init is called
     counter = 0
     for node_id in request.json.keys():
-        print(f"this is the id {node_id}")
         resources_queue.put_nowait((Node(int(node_id)), "add"))
         counter += 1
     with n_init.get_lock():
@@ -1005,9 +1005,6 @@ def node_change():
     global node_update
     global n_node
     update = request.get_json()
-    print("node_change called")
-    print(f"this is the id {update[list(update)[0]]}")
-    print(f"this is the op {update[list(update)[1]]}")
     resources_queue.put_nowait([Node(int(update[list(update)[0]])), update[list(update)[1]]])
     with n_node.get_lock():
         n_node.value += 1

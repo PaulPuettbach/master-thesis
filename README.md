@@ -8,7 +8,7 @@ make java code
 call javac on te file  
 take the resulting class file and any other things you need with it and call
 jar cf jar-file input-file(s)
-mvn clean package
+mvn clean package -DskipTests -Dmaven.buildNumber.skip
 
 #what i changed so far
 added new role to service account
@@ -74,6 +74,15 @@ step three
 mc alias set myminio https://localhost:9000 minio minio123 --insecure
 
 option after
-mc mb -- make new bucket e.g mc mb myminio/mybucket --insecure
+mc mb myminio/mybucket --insecure
 
-mc cp -- copy from source to destionation e.g. mc cp --recursive --insecure /mnt/d/mystuff2/master_thesis/src/benchmark/toUpload/ myminio/mybucket/
+mc cp --recursive --insecure /mnt/d/mystuff2/master_thesis/src/benchmark/toUpload/ myminio/mybucket/
+
+mc rm --insecure myminio/mybucket/
+
+tar --use-compress-program=unzstd -xvf archive.tar.zst
+
+
+just had to change the parsers it was messing with the files so now:
+    goto the benchmark and remake the project and reupload it to minio
+    then rerun the test on minio but thistime add to lazy to mc copy the right data onto the resulsts folder locally already and run the coalasce already

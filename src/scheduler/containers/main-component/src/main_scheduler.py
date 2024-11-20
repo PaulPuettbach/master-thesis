@@ -88,8 +88,6 @@ def nodes_available():
 
 def schedule(meta, node, namespace="spark-namespace"):
     global pod_name_list_scheduled
-
-    print(f"schedule called, number of pods ",flush=True)
     if not node:
         print("no usuable nodes", flush=True)
         raise Exception("cannot schedule no available nodes") 
@@ -122,9 +120,7 @@ def watch_pod():
         tenantname =  [x.value for x in event['object'].spec.containers[0].env if x.name == "SPARK_USER"][0]
         if event['object'].status.phase == "Pending" and event['object'].spec.scheduler_name == "custom-scheduler":
             #update the worker nodes
-            print("potentially new pod")
             if event['object'].metadata.name not in pod_name_list_running:
-                print(f"new pod with this name {event['object'].metadata.name}, with this id {pod_id}", flush=True)
                 update_worker(pod_id, tenantname, "Pending")
                 pod_name_list_running.append(event['object'].metadata.name)
                 meta = client.V1ObjectMeta()
@@ -132,13 +128,14 @@ def watch_pod():
                 meta.uid = event['object'].metadata.uid
                 pod_dic[pod_id] = meta
                 pod_id += 1
-        # if event['object'].status.phase == "Succeeded" and event['object'].spec.scheduler_name == "custom-scheduler":
-        #     if event['object'].metadata.name in pod_name_list_running:
-        #         for pod_meta in list(pod_dic.values()):
-        #             if pod_meta.name == event['object'].metadata.name:
-        #                 pod_id = list(pod_dic.keys())[list(pod_dic.values()).index(pod_meta)]
-        #         update_worker(pod_id, tenantname, "Succeeded")
-        #         pod_name_list_running.remove(pod_meta.name)
+        if (event['object'].status.phase == "Succeeded" or event['object'].status.phase == "Failed") and event['object'].spec.scheduler_name == "custom-scheduler":
+            if event['object'].metadata.name in pod_name_list_running:
+                for pod_meta in list(pod_dic.values()):
+                    if pod_meta.name == event['object'].metadata.name:
+                        pod_id = list(pod_dic.keys())[list(pod_dic.values()).index(pod_meta)]
+                        update_worker(pod_id, tenantname, "Succeeded")
+                        pod_name_list_running.remove(pod_meta.name)
+                        break
 
 def schedule_on_node(resource_id, ids):
     global resource_dic
@@ -150,9 +147,6 @@ def schedule_on_node(resource_id, ids):
 
                     
 """Ingress"""
-@app.route('/health', methods=['GET'])
-def health():
-    return 'OK', 200
 
 @app.route('/update-solution', methods=['POST'])
 def update():
@@ -171,17 +165,6 @@ def update():
 
 
 """Egress"""
-#check status of server
-# def test_worker():
-#     url = f"http://{worker_service}/test"
-#     print(f"this is the url that it is pinging {url}")
-#     response = requests.get(url)
-#     if response.status_code < 400:
-#         print(f"Request successful with status code: {response.status_code}")
-#         print(response.text)
-#         return response
-#     else:
-#         print(f"Request unsuccessful with status code: {response.status_code}")
         
 def init_worker():
     url = f"http://{worker_service}/init"
@@ -220,10 +203,6 @@ def node_change(node, operation):
 """main """
 
 def main():
-    #only need this if the number fo 
-    # with concurrent.futures.ThreadPoolExecutor() as executor:
-    #     n = executor.submit(watch_node)
-    #     p = executor.submit(watch_pod)
     flask_thread = Thread(target=app.run, kwargs={'host': '0.0.0.0', 'port': '80'})
     flask_thread.start()
     init_worker()
