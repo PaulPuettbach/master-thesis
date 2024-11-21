@@ -82,7 +82,5 @@ mc rm --insecure myminio/mybucket/
 
 tar --use-compress-program=unzstd -xvf archive.tar.zst
 
-
-just had to change the parsers it was messing with the files so now:
-    goto the benchmark and remake the project and reupload it to minio
-    then rerun the test on minio but thistime add to lazy to mc copy the right data onto the resulsts folder locally already and run the coalasce already
+make single script that customizes the spark submit with a: user, algorithm, number of executors and a graph.
+could be bad but when reading from the property file we assume the space is always there

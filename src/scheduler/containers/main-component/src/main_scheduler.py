@@ -118,6 +118,7 @@ def watch_pod():
     global pod_name_list_running
     for event in w.stream(v1.list_namespaced_pod, "spark-namespace"):
         tenantname =  [x.value for x in event['object'].spec.containers[0].env if x.name == "SPARK_USER"][0]
+        print(f"this is the tenantname: {tenantname}", flush=True)
         if event['object'].status.phase == "Pending" and event['object'].spec.scheduler_name == "custom-scheduler":
             #update the worker nodes
             if event['object'].metadata.name not in pod_name_list_running:
