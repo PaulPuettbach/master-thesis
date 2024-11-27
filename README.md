@@ -71,7 +71,7 @@ step two different console
 kubectl port-forward svc/myminio-hl 9000 -n minio-tenant
 
 step three
-mc alias set myminio https://localhost:9000 minio minio123 --insecure
+mc alias set myminio http://localhost:9000 minio minio123 --insecure
 
 option after
 mc mb myminio/mybucket --insecure
@@ -81,6 +81,3 @@ mc cp --recursive --insecure /mnt/d/mystuff2/master_thesis/src/benchmark/toUploa
 mc rm --insecure myminio/mybucket/
 
 tar --use-compress-program=unzstd -xvf archive.tar.zst
-
-make single script that customizes the spark submit with a: user, algorithm, number of executors and a graph.
-could be bad but when reading from the property file we assume the space is always there
