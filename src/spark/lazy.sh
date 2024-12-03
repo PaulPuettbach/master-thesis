@@ -3,23 +3,30 @@
 # #this does not work
 # #--conf spark.executorEnv.SPARK_USER="Fred" \
 # # cd ../scheduler
+export PATH=$PATH:$HOME/minio-binaries/
 if [ $# -ne 4 ]
 then
     echo "the 4 arguments provided that are needed are: <user>, <algorithm>, <number of executors>, <graph>" 1>&2
     exit 1
 fi
+#user input
 user=$1
 algorithm=$2
 n_executor=$3
 graph=$4
 
+#buckets dont work well with hyphens in the name for some reason so paramter expansion and replacing 
+outputpath="${graph//-/_}"
 file="../config-template/graphs/$graph.properties"
-vertex_file=$(grep '\.vertex-file =' "../config-template/graphs/$graph.properties" | cut -d'=' -f2)
-edge_file=$(grep '\.edge-file =' "../config-template/graphs/$graph.properties" | cut -d '=' -f2)
-directed=$(grep '\.directed =' "../config-template/graphs/$graph.properties" | cut -d'=' -f2)
+vertex_file=$(grep '\.vertex-file =' "../benchmark/config-template/graphs/$graph.properties" | cut -d'=' -f2 | xargs)
+edge_file=$(grep '\.edge-file =' "../benchmark/config-template/graphs/$graph.properties" | cut -d '=' -f2 | xargs)
+directed=$(grep '\.directed =' "../benchmark/config-template/graphs/$graph.properties" | cut -d'=' -f2 | xargs)
 
-params=$(awk -F"=" '/# Parameters/ {y=1;next} y {gsub(/^[ \t]+/, "", $2); if (a) print a" \\"; a=$2;} END {gsub(/^[ \t]+/, "", $2); print $2}' ../config-template/graphs/$graph.properties)
-# Remove the last two characters
+#params=$(awk -F"=" '/# Parameters/ {y=1;next} y {gsub(/^[ \t]+/, "", $2); if (a) print a" \\"; a=$2;} END {gsub(/^[ \t]+/, "", $2); print $2}' ../benchmark/config-template/graphs/$graph.properties)
+params=$(awk -F"=" '/# Parameters/ {y=1;next} y {gsub(/^[ \t]+/, "", $2); print $2 ;}' ../benchmark/config-template/graphs/$graph.properties)
+for param in $params; do
+    spark_args+=("$param")
+done
 
 
 case $algorithm in
@@ -48,11 +55,12 @@ case $algorithm in
         ;;
 esac
 
+
 ./cleanup.sh
 
 cd ../scheduler/containers/util
 
-./load-repo.sh
+# ./load-repo.sh
 
 cd ../../
 
@@ -80,11 +88,11 @@ echo "-----------------------------------------------------------"
     --conf spark.hadoop.fs.s3a.path.style.access=true \
     --conf spark.hadoop.fs.s3a.impl=org.apache.hadoop.fs.s3a.S3AFileSystem \
     s3a://mybucket/graphalytics-platforms-graphx-0.2-SNAPSHOT-default.jar \
-    s3a://mybucket/$graph/$vertex_file\
-    s3a://mybucket/$graph/$edge_file \
+    s3a://mybucket/$outputpath/${vertex_file} \
+    s3a://mybucket/$outputpath/${edge_file} \
     $directed \
-    s3a://mybucket/$graph/output \
-    "$params"
+    s3a://mybucket/$outputpath/output \
+    "${spark_args[@]}"
 
 
 echo "-----------------------------------------------------------"
@@ -92,35 +100,37 @@ kubectl logs $(kubectl get pods --no-headers -o custom-columns=":metadata.name" 
 echo "-----------------------------------------------------------"
 kubectl logs $(kubectl get pods --no-headers -o custom-columns=":metadata.name" -n kube-system | grep 'scheduler-daemon') -n kube-system #-c init-main-service
 
-mc cp --recursive --insecure myminio/mybucket/test-bfs/output/ /mnt/d/mystuff2/master_thesis/src/benchmark/results/test-bfs/output/
-mc cp --recursive --insecure myminio/mybucket/test-cdlp/output/ /mnt/d/mystuff2/master_thesis/src/benchmark/results/test-cdlp/output/
-mc cp --recursive --insecure myminio/mybucket/test-lcc/output/ /mnt/d/mystuff2/master_thesis/src/benchmark/results/test-lcc/output/
-mc cp --recursive --insecure myminio/mybucket/test-pr/output/ /mnt/d/mystuff2/master_thesis/src/benchmark/results/test-pr/output/
-mc cp --recursive --insecure myminio/mybucket/test-sssp/output/ /mnt/d/mystuff2/master_thesis/src/benchmark/results/test-sssp/output/
-mc cp --recursive --insecure myminio/mybucket/test-wcc/output/ /mnt/d/mystuff2/master_thesis/src/benchmark/results/test-wcc/output/
+# mc cp --recursive --insecure myminio/mybucket/test-bfs/output/ /mnt/d/mystuff2/master_thesis/src/benchmark/results/test-bfs/output/
+# mc cp --recursive --insecure myminio/mybucket/test-cdlp/output/ /mnt/d/mystuff2/master_thesis/src/benchmark/results/test-cdlp/output/
+# mc cp --recursive --insecure myminio/mybucket/test-lcc/output/ /mnt/d/mystuff2/master_thesis/src/benchmark/results/test-lcc/output/
+mc cp --recursive --insecure myminio/mybucket/test_pr_directed/output/ /mnt/d/mystuff2/master_thesis/src/benchmark/results/test-pr/output/
+# mc cp --recursive --insecure myminio/mybucket/test-sssp/output/ /mnt/d/mystuff2/master_thesis/src/benchmark/results/test-sssp/output/
+# mc cp --recursive --insecure myminio/mybucket/test-wcc/output/ /mnt/d/mystuff2/master_thesis/src/benchmark/results/test-wcc/output/
 
 cd ../benchmark/results/
 
-cd test-bfs/
-./coalasce.sh
-cd ..
+# cd test-bfs/
+# ./coalasce.sh
+# cd ..
 
-cd test-cdlp/
-./coalasce.sh
-cd ..
+# cd test-cdlp/
+# ./coalasce.sh
+# cd ..
 
-cd test-lcc/
-./coalasce.sh
-cd ..
+# cd test-lcc/
+# ./coalasce.sh
+# cd ..
 
 cd test-pr/
 ./coalasce.sh
-cd ..
+# cd ..
 
-cd test-sssp/
-./coalasce.sh
-cd ..
+# cd test-sssp/
+# ./coalasce.sh
+# cd ..
 
-cd test-wcc/
-./coalasce.sh
-cd ..
+# cd test-wcc/
+# ./coalasce.sh
+
+# echo "-----------------------------------------------------------"
+# kubectl logs $(kubectl get pods --no-headers -o custom-columns=":metadata.name" -n spark-namespace ) -n spark-namespace

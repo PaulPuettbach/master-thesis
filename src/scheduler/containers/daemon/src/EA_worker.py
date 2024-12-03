@@ -287,10 +287,6 @@ best_solution = Genotype([])
 #weather there is a new best solution
 new_best = False
 
-#taken from https://stackoverflow.com/questions/8391411/how-to-block-calls-to-print
-# Disable
-def blockPrint():
-    sys.stdout = open(os.devnull, 'w')
 
 
 """
@@ -483,6 +479,8 @@ def add_tasks_to_genotype():
     global population
     global new_tasks
     global best_solution
+    global n_new_tasks
+    global no_task
 
     rec_task_counter = 0
 
@@ -499,11 +497,18 @@ def add_tasks_to_genotype():
         best_solution = Genotype([])
     
     #iterate n times. N being equal to poolsize
+        # print(f"in the add tasks this taks is added test {task.id}", flush=True)
+        # print(f"rec task counter in loop {rec_task_counter}, n_new_tasks in loop {n_new_tasks.value}")
         for genotype in population.population_array:
             resource_id = random.randint(0, len(genotype._gene_array) -1 )# including the last number so minus one for index
             genotype._gene_array[resource_id].tasksqueue.append(task)
-    with n_new_tasks.get_lock():
-        n_new_tasks.value = 0
+    if rec_task_counter > 0:
+        with n_new_tasks.get_lock():
+            n_new_tasks.value -= rec_task_counter
+        #     print(f"rec task counter after decrementing in the afetermath {rec_task_counter}, n_new_tasks in loop {n_new_tasks.value}")
+        # print("we get in the setting no task value to false again", flush=True)
+        with no_task.get_lock():
+            no_task.value = False
 
 
 """
@@ -520,6 +525,8 @@ def del_tasks_from_genotype():
     global population
     global old_tasks
     global best_solution
+    global no_task
+    global n_old_tasks
 
     rec_task_counter = 0
 
@@ -535,16 +542,18 @@ def del_tasks_from_genotype():
         rec_task_counter += 1
         best_solution = Genotype([])
 
+        print(f"removing this task {task.id}", flush=True)
         for gene in [gene for genotype in population.population_array for gene in genotype._gene_array]:
             try:
                 gene.tasksqueue.remove(task)
             except ValueError:
+                print(f"encountered error with this tasks removing {task.id}", flush=True)
                 pass
     if not [tasks for genes in population.population_array[0]._gene_array for tasks in genes.tasksqueue]:
         with no_task.get_lock():
             no_task.value = True
     with n_old_tasks.get_lock():
-        n_old_tasks.value = 0
+        n_old_tasks.value -= rec_task_counter
 
 
 """
@@ -685,8 +694,11 @@ def partially_mapped_crossover(parent1, parent2):
     child = Genotype([])
     
     leftover_tasks = []
+    #used to just use the id as the index for the bitmap but ids only increase due to some synchronization issues that were fixed and you might have 3 tasks but one of them has an index of 500 which seems
+    #wastefull to allocate so much memory in the bitmap this is a quick if hard to parse workaround the index of the id in the task_id_array is what is set and tested for the bitmap
+    task_id_array = [tasks.id for gene in parent1._gene_array for tasks in gene.tasksqueue]
     # one more than number of tasks in total because id start at one and constant arithmatic is more wasterful then simply having one more unused bit
-    bm = BitMap(len([tasks for gene in parent1._gene_array for tasks in gene.tasksqueue]) +1)
+    bm = BitMap(len(task_id_array))
     gene_idx = 0
     while gene_idx < len(parent1._gene_array):
         #in case there are no tasks in the taskqueue for the resource
@@ -695,7 +707,7 @@ def partially_mapped_crossover(parent1, parent2):
             cleanup_idx = 0
             cleanup_taks = parent2._gene_array[gene_idx].tasksqueue
             while cleanup_idx < len(cleanup_taks):
-                if not bm.test(cleanup_taks[cleanup_idx].id):
+                if not bm.test(task_id_array.index(cleanup_taks[cleanup_idx].id)):
                     leftover_tasks.append(cleanup_taks[cleanup_idx])
                 cleanup_idx = cleanup_idx +1
 
@@ -736,9 +748,9 @@ def partially_mapped_crossover(parent1, parent2):
             
             if child_task_idx < n_tasks_per_chunk:
                 while not task_taken and chosen_idx < len(chosen_parent_tasks):
-                    if not bm.test(chosen_parent_tasks[chosen_idx].id):
+                    if not bm.test(task_id_array.index(chosen_parent_tasks[chosen_idx].id)):
                         child._gene_array[gene_idx].tasksqueue[child_task_idx] = chosen_parent_tasks[chosen_idx]
-                        bm.set(chosen_parent_tasks[chosen_idx].id)
+                        bm.set(task_id_array.index(chosen_parent_tasks[chosen_idx].id))
                         task_taken = True
                         chosen_idx = chosen_idx +1
                     else:
@@ -746,9 +758,9 @@ def partially_mapped_crossover(parent1, parent2):
                         continue
 
                 while not task_taken and other_idx < len(other_parent_tasks):
-                    if not bm.test(other_parent_tasks[other_idx].id):
+                    if not bm.test(task_id_array.index(other_parent_tasks[other_idx].id)):
                         child._gene_array[gene_idx].tasksqueue[child_task_idx] = other_parent_tasks[other_idx]
-                        bm.set(other_parent_tasks[other_idx].id)
+                        bm.set(task_id_array.index(other_parent_tasks[other_idx].id))
                         task_taken = True
                         other_idx = other_idx +1
                     else:
@@ -756,9 +768,9 @@ def partially_mapped_crossover(parent1, parent2):
                         continue
             else:
                 while not task_taken and other_idx < len(other_parent_tasks):
-                    if not bm.test(other_parent_tasks[other_idx].id):
+                    if not bm.test(task_id_array.index(other_parent_tasks[other_idx].id)):
                         child._gene_array[gene_idx].tasksqueue[child_task_idx] = other_parent_tasks[other_idx]
-                        bm.set(other_parent_tasks[other_idx].id)
+                        bm.set(task_id_array.index(other_parent_tasks[other_idx].id))
                         task_taken = True
                         other_idx = other_idx +1
                     else:
@@ -766,9 +778,9 @@ def partially_mapped_crossover(parent1, parent2):
                         continue
                 
                 while not task_taken and chosen_idx < len(chosen_parent_tasks):
-                    if not bm.test(chosen_parent_tasks[chosen_idx].id):
+                    if not bm.test(task_id_array.index(chosen_parent_tasks[chosen_idx].id)):
                         child._gene_array[gene_idx].tasksqueue[child_task_idx] = chosen_parent_tasks[chosen_idx]
-                        bm.set(chosen_parent_tasks[chosen_idx].id)
+                        bm.set(task_id_array.index(chosen_parent_tasks[chosen_idx].id))
                         task_taken = True
                         chosen_idx = chosen_idx +1
                     else:
@@ -776,21 +788,21 @@ def partially_mapped_crossover(parent1, parent2):
                         continue
             if not task_taken:
                 for task_idx in range(len(leftover_tasks)-1):
-                    if not bm.test(leftover_tasks[task_idx].id):
+                    if not bm.test(task_id_array.index(leftover_tasks[task_idx].id)):
                         child._gene_array[gene_idx].tasksqueue[child_task_idx] = leftover_tasks[task_idx]
                         leftover_tasks.pop(task_idx)
-                        bm.set(leftover_tasks[task_idx].id)
+                        bm.set(task_id_array.index(leftover_tasks[task_idx].id))
                         task_taken = True
                         break
             child_task_idx = child_task_idx +1
         #after this point there is guranttedd to be a task in the child queue and any leftover go to leftovers
         while chosen_idx < len(chosen_parent_tasks):
-            if not bm.test(chosen_parent_tasks[chosen_idx].id):
+            if not bm.test(task_id_array.index(chosen_parent_tasks[chosen_idx].id)):
                 leftover_tasks.append(chosen_parent_tasks[chosen_idx])
             chosen_idx = chosen_idx +1
         
         while other_idx < len(other_parent_tasks):
-            if not bm.test(other_parent_tasks[other_idx].id):
+            if not bm.test(task_id_array.index(other_parent_tasks[other_idx].id)):
                 leftover_tasks.append(other_parent_tasks[other_idx]   )
             other_idx = other_idx +1
         gene_idx = gene_idx +1
@@ -880,10 +892,12 @@ def epoch():
         
         if not current_resources:
             continue
-        #add tasks to genotype dont need atomicity here if something is put into new_tasks or old_tasks from the batch update while this runs do it next epocj rather than lock
-        add_tasks_to_genotype()
+
+        #could be that as we get batch update and then call deltasks overwriting the flag that there are new tasks
         #del tasks to genotype
         del_tasks_from_genotype()
+        #add tasks to genotype dont need atomicity here if something is put into new_tasks or old_tasks from the batch update while this runs do it next epocj rather than lock
+        add_tasks_to_genotype()
 
         if no_task.value:
             continue
@@ -909,6 +923,9 @@ def epoch():
 
         if new_best:
             new_best = False
+            for gene in best_solution._gene_array:
+                for task in gene.tasksqueue:
+                    print(f"this is the pod id for all pods that should be scheduled {task.id}", flush=True)
             worker_thread = threading.Thread(target=update_solution, args=[best_solution])
             worker_thread.start()
 
@@ -932,7 +949,7 @@ def update_solution(solution):
     if response.status_code < 400:
         return response
     else:
-        print(f"Request failed with status code {response.status_code}")
+        print(f"Request failed with status code {response.status_code}", flush=True)
     
 
 """Ingress"""
@@ -948,6 +965,8 @@ def update_batch():
     global old_tasks
     global no_task
     global update_q
+    global n_old_tasks
+    global n_new_tasks
     while True:
         tasks_arrived.wait()
 
@@ -970,14 +989,14 @@ def update_batch():
             if task_cast.status == "Succeeded":
                 old_tasks.put_nowait(task_cast)
                 counter_old += 1
-            if counter_new > 0:
-                with n_new_tasks.get_lock():
-                    n_new_tasks.value = counter_new
-            if counter_old > 0:
-                with n_old_tasks.get_lock():
-                    n_old_tasks.value = counter_old
-            with no_task.get_lock():
-                no_task.value = False
+        if counter_new > 0:
+            with n_new_tasks.get_lock():
+                n_new_tasks.value = n_new_tasks.value + counter_new
+        if counter_old > 0:
+            with n_old_tasks.get_lock():
+                n_old_tasks.value = n_old_tasks.value + counter_old
+        with no_task.get_lock():
+            no_task.value = False
     
 
 
@@ -1004,7 +1023,7 @@ def node_change():
     global resources_queue
     global node_update
     global n_node
-    update = request.get_json()
+    update = request.json
     resources_queue.put_nowait([Node(int(update[list(update)[0]])), update[list(update)[1]]])
     with n_node.get_lock():
         n_node.value += 1
@@ -1021,10 +1040,11 @@ def update():
     global tasks_arrived
     global update_q
     incoming_task = request.json
+    print(f"this is the id when ingress update {int(incoming_task[list(incoming_task)[0]])}", flush=True)
     with thread_lock_update_q:
         update_q.append(incoming_task)
         tasks_arrived.set()
-    return 'OK', 200
+    return('OK', 200)
 
 def util_process():
     #IO bound

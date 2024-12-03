@@ -93,6 +93,7 @@ def schedule(meta, node, namespace="spark-namespace"):
         raise Exception("cannot schedule no available nodes") 
     
     if meta.name not in pod_name_list_scheduled:
+        #print(f"this is the name of the pod being scheduled {meta.name}", flush=True)
         
         target=client.V1ObjectReference()
         target.kind="Node"
@@ -118,10 +119,11 @@ def watch_pod():
     global pod_name_list_running
     for event in w.stream(v1.list_namespaced_pod, "spark-namespace"):
         tenantname =  [x.value for x in event['object'].spec.containers[0].env if x.name == "SPARK_USER"][0]
-        print(f"this is the tenantname: {tenantname}", flush=True)
         if event['object'].status.phase == "Pending" and event['object'].spec.scheduler_name == "custom-scheduler":
             #update the worker nodes
             if event['object'].metadata.name not in pod_name_list_running:
+                # print(f"this is the podname: {event['object'].metadata.name}", flush=True)
+                # print(f"this is the pod id {pod_id}", flush=True)
                 update_worker(pod_id, tenantname, "Pending")
                 pod_name_list_running.append(event['object'].metadata.name)
                 meta = client.V1ObjectMeta()
@@ -133,8 +135,8 @@ def watch_pod():
             if event['object'].metadata.name in pod_name_list_running:
                 for pod_meta in list(pod_dic.values()):
                     if pod_meta.name == event['object'].metadata.name:
-                        pod_id = list(pod_dic.keys())[list(pod_dic.values()).index(pod_meta)]
-                        update_worker(pod_id, tenantname, "Succeeded")
+                        pod_id_to_remove = list(pod_dic.keys())[list(pod_dic.values()).index(pod_meta)]
+                        update_worker(pod_id_to_remove, tenantname, "Succeeded")
                         pod_name_list_running.remove(pod_meta.name)
                         break
 
@@ -142,6 +144,7 @@ def schedule_on_node(resource_id, ids):
     global resource_dic
     global pod_dic
     for id in ids:
+        # print(f"attempting to schedule id {id}", flush=True)
         with thread_lock:
             schedule(pod_dic[id], resource_dic[int(resource_id)])
 
@@ -157,11 +160,14 @@ def update():
         return
     else:
         best_fitness = update[list(update)[0]]
+    threads = []
     for key, value in update.items():
         if key == "fitness":
             continue
         worker = Thread(target=schedule_on_node, args=[key, value])
         worker.start()
+    for thread in threads:
+        thread.join()
     return "OK", 200
 
 
@@ -180,16 +186,17 @@ def init_worker():
     if response.status_code < 400:
         return response
     else:
-        print(f"Request failed with status code {response.status_code}")
+        print(f"Request failed with status code {response.status_code}", flush=True)
 
 def update_worker(id, tenant, status):
     url = f"http://{worker_service}/update"
     json_obj = {"id": id, "tenant": tenant, "status": status}
+    #print(f"updating daemon with this id {id}", flush=True)
     response = requests.post(url, json = json_obj)
     if response.status_code < 400:
         return response
     else:
-        print(f"Request failed with status code {response.status_code}")
+        print(f"Request failed with status code {response.status_code}", flush=True)
 
 def node_change(node, operation):
     url = f"http://{worker_service}/node-change"
@@ -199,7 +206,7 @@ def node_change(node, operation):
     if response.status_code < 400:
         return response
     else:
-        print(f"Request failed with status code {response.status_code}")
+        print(f"Request failed with status code {response.status_code}", flush=True)
 
 """main """
 
