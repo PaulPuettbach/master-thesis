@@ -66,7 +66,8 @@ cd ../../spark
     --name $algorithm \
     --conf spark.kubernetes.namespace=spark-namespace \
     --conf spark.executor.instances=$n_executor \
-    --conf spark.executorEnv.SPARK_USER=$user \
+    --conf spark.executorEnv.SPARK_USER_MANUEL=$user \
+    --conf spark.kubernetes.driverEnv.SPARK_USER_MANUEL=$user \
     --conf spark.kubernetes.scheduler.name=custom-scheduler \
     --conf spark.kubernetes.authenticate.driver.serviceAccountName=spark \
     --conf spark.kubernetes.container.image=paulpuettbach/spark_image/spark:test \

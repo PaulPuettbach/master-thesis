@@ -76,7 +76,7 @@ mc alias set myminio http://localhost:9000 minio minio123 --insecure
 option after
 mc mb myminio/mybucket --insecure
 
-mc cp --recursive --insecure /mnt/d/mystuff2/master_thesis/src/benchmark/toUpload/ myminio/mybucket/
+mc cp --recursive --insecure /mnt/d/mystuff2/master_thesis/src/benchmark/toUpload/graphs/test-bfs-directed myminio/mybucket/
 
 mc rm --insecure myminio/mybucket/
 

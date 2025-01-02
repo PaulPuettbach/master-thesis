@@ -8,7 +8,7 @@ kubectl delete rolebinding pod-create-spark-role-binding -n spark-namespace
 kubectl delete role pod-create-spark -n spark-namespace
 kubectl delete serviceaccount spark -n spark-namespace
 
-mc --insecure rm  myminio/mybucket/test_bfs_directed/output --recursive --force
+mc --insecure rm  myminio/mybucket/test-bfs-directed/output --recursive --force
 mc --insecure rm  myminio/mybucket/test_cdlp_directed/output --recursive --force
 mc --insecure rm  myminio/mybucket/test_lcc_directed/output --recursive --force
 mc --insecure rm  myminio/mybucket/test_pr_directed/output/ --recursive --force

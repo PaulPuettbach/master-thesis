@@ -16,7 +16,7 @@ n_executor=$3
 graph=$4
 
 #buckets dont work well with hyphens in the name for some reason so paramter expansion and replacing 
-outputpath="${graph//-/_}"
+outputpath="${graph}"
 file="../config-template/graphs/$graph.properties"
 vertex_file=$(grep '\.vertex-file =' "../benchmark/config-template/graphs/$graph.properties" | cut -d'=' -f2 | xargs)
 edge_file=$(grep '\.edge-file =' "../benchmark/config-template/graphs/$graph.properties" | cut -d '=' -f2 | xargs)
@@ -56,11 +56,11 @@ case $algorithm in
 esac
 
 
-./cleanup.sh
+#./cleanup.sh
 
 cd ../scheduler/containers/util
 
-# ./load-repo.sh
+./load-repo.sh
 
 cd ../../
 
@@ -78,7 +78,8 @@ echo "-----------------------------------------------------------"
     --name $algorithm \
     --conf spark.kubernetes.namespace=spark-namespace \
     --conf spark.executor.instances=$n_executor \
-    --conf spark.executorEnv.SPARK_USER=$user \
+    --conf spark.executorEnv.SPARK_USER_MANUEL=$user \
+    --conf spark.kubernetes.driverEnv.SPARK_USER_MANUEL=$user \
     --conf spark.kubernetes.scheduler.name=custom-scheduler \
     --conf spark.kubernetes.authenticate.driver.serviceAccountName=spark \
     --conf spark.kubernetes.container.image=paulpuettbach/spark_image/spark:test \

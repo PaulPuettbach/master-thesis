@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-cd ../toUpload/graphs
+cd ../../../toUpload/graphs
 mkdir example-directed        && cd example-directed        && echo example-directed        && wget -O example-directed.tar.zst https://pub-383410a98aef4cb686f0c7601eddd25f.r2.dev/graphalytics/example-directed.tar.zst            && tar --use-compress-program=unzstd -xvf example-directed.tar.zst        && cd ..
 mkdir example-undirected      && cd example-undirected      && echo example-undirected      && wget -O example-undirected.tar.zst https://pub-383410a98aef4cb686f0c7601eddd25f.r2.dev/graphalytics/example-undirected.tar.zst        && tar --use-compress-program=unzstd -xvf example-undirected.tar.zst      && cd ..
 mkdir test-bfs-directed       && cd test-bfs-directed       && echo test-bfs-directed       && wget -O test-bfs-directed.tar.zst https://pub-383410a98aef4cb686f0c7601eddd25f.r2.dev/graphalytics/test-bfs-directed.tar.zst          && tar --use-compress-program=unzstd -xvf test-bfs-directed.tar.zst       && cd ..
