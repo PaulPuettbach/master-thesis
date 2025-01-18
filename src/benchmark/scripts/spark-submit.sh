@@ -19,13 +19,29 @@ graph=$4
 outputpath="${graph//-/_}"
 
 file="../config-template/graphs/$graph.properties"
+if [ ! -f "$file" ]; then
+    echo "the provided graph does not have a corresponding properties file perhaps the graph is not supported or misspelled" 1>&2
+    exit 1
+fi
 #only need the right side of the assignment and cut the prefix whitespace
 vertex_file=$(grep '\.vertex-file =' "../config-template/graphs/$graph.properties" | cut -d'=' -f2 | xargs)
 edge_file=$(grep '\.edge-file =' "../config-template/graphs/$graph.properties" | cut -d '=' -f2 | xargs)
 directed=$(grep '\.directed =' "../config-template/graphs/$graph.properties" | cut -d'=' -f2 | xargs)
 
+supported_algorithms=$(grep '\.algorithms =' "../config-template/graphs/$graph.properties" | cut -d'=' -f2 | xargs)
+
+#the regex means it has to have nothing or a comma preceding and nothing or a comma succiding
+if ! [[ $supported_algorithms =~ (^|, )"$algorithm"(, |$) ]]
+then
+    echo "the algorithm provided is not supported for the graph" 1>&2
+    exit 1
+fi
+
+
+
 #could be multiple
-params=$(awk -F"=" '/# Parameters/ {y=1;next} y {gsub(/^[ \t]+/, "", $2); print $2 ;}' ../config-template/graphs/$graph.properties)
+params=$(awk -F"=" "/# Parameters for ${algorithm^^}/ {y=1;next} y && /# Parameters/ {y=0}  y {gsub(/^[ \t]+/, \"\", \$2); print \$2 ;}" ../config-template/graphs/$graph.properties)
+
 for param in $params; do
     spark_args+=("$param")
 done
@@ -63,7 +79,8 @@ cd ../../spark
     --master k8s://localhost:6443 \
     --deploy-mode cluster \
     --class $class \
-    --name $algorithm \
+    --name ${algorithm}-${graph}-${user} \
+    --conf spark.kubernetes.executor.podNamePrefix= ${algorithm}-${graph}-${user}\
     --conf spark.kubernetes.namespace=spark-namespace \
     --conf spark.executor.instances=$n_executor \
     --conf spark.executorEnv.SPARK_USER_MANUEL=$user \

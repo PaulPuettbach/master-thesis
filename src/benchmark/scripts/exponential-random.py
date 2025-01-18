@@ -1,7 +1,8 @@
 from numpy import random
 from sys import argv
 
-rate = argv[1]
+rate = float(argv[1])
 # scale is inverse of rate
-scale = 1/int(rate)
+scale = 1/rate
 x = random.exponential(scale=scale)
+print(x)

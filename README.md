@@ -14,12 +14,6 @@ mvn clean package -DskipTests -Dmaven.buildNumber.skip
 added new role to service account
 # notes
 
-look up the inversion thing for distributions
-
-look up the state of the pods and try to take them only out if the state is finished
-
-also make sure the node is still available
-
 one issue is the available resources adding that into the calculatons has some problem a a pod does not need to specify that information and it incerases the complexity and overhead like crazy so I try the stop gap messure i simply check the status of the node if i everhave to change that:
 
 for pod in pods.items:
@@ -56,12 +50,13 @@ status:
 also just wget the datasets and copy the run script and the eniter properites flder from the original repo pick 
 random interarrival time from the exponential dis at this time a random user is chosen with a random algorithm and a random graph and spark submitted
 
-more schedulers
-use minio
-at least 3
-look up continuem
+find size for the graphs in benchmark/config_template/benchmarks
+use "time" the bash command for the ttc "real" user is cpu time spend in the user space and then sys is the time spend in kernal space
 
-this has what algorithms can be used with what graphs
+
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!! important have to check if i can keep queing stuff to nodes that are oom should be fine just have them pending n shit i guess
+
+also the k for the sliding window i dependent on the current queue length which is the numnber of pending pods divided by the number of nodes
 
 # notes for minio
 step one

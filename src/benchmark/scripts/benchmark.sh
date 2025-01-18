@@ -1,18 +1,20 @@
 #!/bin/bash
 
-#./cleanup.sh
-export PATH=$PATH:$HOME/minio-binaries/
-cd ../../scheduler/containers/util
+./init.sh
 
-./load-repo.sh
+#figure out kubectl watch to get the fairness for messeaure: wait time error to average wait time with sliding window its called simple moving average and it is the old average plus 1/k *(newest value - oldest value)
+# the k (number of values in the sliding window) should be chosen such that it is close to the number of elements currently in the queue which is lamda
+kubectl get pod --no-headers -o custom-columns=NODE:.spec.nodeName -n minio | grep 'scheduler-daemon'
 
-cd ../../
+#sample from the exponetial ditsribution for the interarrival time
+rate=2.5
+x=$(python3 generate_exponential.py "$rate")
 
-helm install scheduler main-helm-chart/ --wait
-cd ../spark
+#pick random tenant
+tenants="tenants.txt"
+random_tenant=$(shuf -n 1 "$tenants")
 
-kubectl apply -f service.account.yaml
-cd ../benchmark/scripts
+#pick random graph
 
 ./spark-submit.sh paul bfs 3 test-bfs-directed
 ./spark-submit.sh paul cdlp 3 test-cdlp-directed
@@ -57,10 +59,6 @@ cd test-wcc/
 
 
 
-# #this is a section for debuging to be taking out at a later
-# echo "-----------------------------------------------------------"
-# kubectl logs $(kubectl get pods --no-headers -o custom-columns=":metadata.name" -n spark-namespace ) -n spark-namespace
-# echo "-----------------------------------------------------------"
-# kubectl logs $(kubectl get pods --no-headers -o custom-columns=":metadata.name" -n kube-system | grep '^scheduler' | grep -v 'scheduler-daemon') -n kube-system #-c  init-daemon-service
-# echo "-----------------------------------------------------------"
-# kubectl logs $(kubectl get pods --no-headers -o custom-columns=":metadata.name" -n kube-system | grep 'scheduler-daemon') -n kube-system #-c init-main-service
+./logging
+
+./cleanup
