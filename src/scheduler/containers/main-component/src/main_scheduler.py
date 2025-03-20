@@ -58,7 +58,7 @@ def watch_node_conditions():
                 resource_dic[node_id] = node_name
             node_change(node_id, "add")
 
-        if not eligable and node_name in resource_dic.values():
+        if not (eligable and node_name) in resource_dic.values():
             with thread_lock:
                 resource_dic = {key:val for key, val in resource_dic.items() if val != node_name}
             node_change(node_id, "delete")
@@ -93,7 +93,7 @@ def schedule(meta, node, namespace="spark-namespace"):
         raise Exception("cannot schedule no available nodes") 
     
     if meta.name not in pod_name_list_scheduled:
-        #print(f"this is the name of the pod being scheduled {meta.name}", flush=True)
+        print(f"this is the name of the pod being scheduled {meta.name}", flush=True)
         
         target=client.V1ObjectReference()
         target.kind="Node"
@@ -123,7 +123,7 @@ def watch_pod():
             #update the worker nodes
             if event['object'].metadata.name not in pod_name_list_running:
                 tenantname = [x.value for x in event['object'].spec.containers[0].env if x.name == "SPARK_USER_MANUEL"][0]
-                print(f"this is the tenantname: {tenantname}", flush=True)
+                #print(f"this is the tenantname: {tenantname}", flush=True)
                 # print(f"this is the pod id {pod_id}", flush=True)
                 update_worker(pod_id, tenantname, "Pending")
                 pod_name_list_running.append(event['object'].metadata.name)

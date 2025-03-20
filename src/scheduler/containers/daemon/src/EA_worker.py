@@ -542,7 +542,7 @@ def del_tasks_from_genotype():
         rec_task_counter += 1
         best_solution = Genotype([])
 
-        print(f"removing this task {task.id}", flush=True)
+        #print(f"removing this task {task.id}", flush=True)
         for gene in [gene for genotype in population.population_array for gene in genotype._gene_array]:
             try:
                 gene.tasksqueue.remove(task)
@@ -923,9 +923,9 @@ def epoch():
 
         if new_best:
             new_best = False
-            for gene in best_solution._gene_array:
-                for task in gene.tasksqueue:
-                    print(f"this is the pod id for all pods that should be scheduled {task.id}", flush=True)
+            # for gene in best_solution._gene_array:
+            #     for task in gene.tasksqueue:
+            #         print(f"this is the pod id for all pods that should be scheduled {task.id}", flush=True)
             worker_thread = threading.Thread(target=update_solution, args=[best_solution])
             worker_thread.start()
 

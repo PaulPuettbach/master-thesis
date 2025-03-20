@@ -1,12 +1,10 @@
 #!/bin/bash
 
-# #this does not work
-# #--conf spark.executorEnv.SPARK_USER="Fred" \
-# # cd ../scheduler
+
 export PATH=$PATH:$HOME/minio-binaries/
-if [ $# -ne 4 ]
+if [ $# -ne 7 ]
 then
-    echo "the 4 arguments provided that are needed are: <user>, <algorithm>, <number of executors>, <graph>" 1>&2
+    echo "the 7 arguments provided that are needed are: <user>, <algorithm>, <number of executors>, <graph>, <size_of_graph>, <scheduler>, <name>" 1>&2
     exit 1
 fi
 #user input
@@ -14,9 +12,11 @@ user=$1
 algorithm=$2
 n_executor=$3
 graph=$4
-
+size_of_graph=$5
+scheduler=$6
+name=$7
 #buckets dont work well with hyphens in the name for some reason so paramter expansion and replacing 
-outputpath="${graph//-/_}"
+outputpath="graphs/$size_of_graph/$graph/"
 
 file="../config-template/graphs/$graph.properties"
 if [ ! -f "$file" ]; then
@@ -37,7 +37,27 @@ then
     exit 1
 fi
 
+if ! [[ $size_of_graph =~ ^(test_graphs|size_S|size_M)$ ]]
+then
+    echo "<size of graph> has to be one of test_graphs, size_S, size_M" 1>&2
+    exit 1
+fi
 
+case $scheduler in
+
+    default)
+        scheduler_conf=()
+        ;;
+    custom-scheduler)
+        scheduler_conf=(
+            "--conf spark.kubernetes.scheduler.name=custom-scheduler"
+        )
+        ;;
+    *)
+        echo "provided <scheduler> is not one of: default, custom-scheduler" 1>&2
+        exit 1
+        ;;
+esac
 
 #could be multiple
 params=$(awk -F"=" "/# Parameters for ${algorithm^^}/ {y=1;next} y && /# Parameters/ {y=0}  y {gsub(/^[ \t]+/, \"\", \$2); print \$2 ;}" ../config-template/graphs/$graph.properties)
@@ -75,17 +95,20 @@ esac
 
 cd ../../spark
 
+
+
 ./spark-3.5.0-bin-hadoop3/bin/spark-submit \
     --master k8s://localhost:6443 \
     --deploy-mode cluster \
     --class $class \
-    --name ${algorithm}-${graph}-${user} \
-    --conf spark.kubernetes.executor.podNamePrefix= ${algorithm}-${graph}-${user}\
+    --name ${name} \
+    --conf spark.kubernetes.executor.podNamePrefix=${name} \
     --conf spark.kubernetes.namespace=spark-namespace \
-    --conf spark.executor.instances=$n_executor \
-    --conf spark.executorEnv.SPARK_USER_MANUEL=$user \
-    --conf spark.kubernetes.driverEnv.SPARK_USER_MANUEL=$user \
-    --conf spark.kubernetes.scheduler.name=custom-scheduler \
+    --conf spark.executor.instances="$n_executor" \
+    --conf spark.executorEnv.SPARK_USER_MANUEL="$user" \
+    --conf spark.kubernetes.driverEnv.SPARK_USER_MANUEL="$user" \
+    --conf spark.kubernetes.executor.deleteOnTermination=false \
+    ${scheduler_conf[@]} \
     --conf spark.kubernetes.authenticate.driver.serviceAccountName=spark \
     --conf spark.kubernetes.container.image=paulpuettbach/spark_image/spark:test \
     --conf spark.hadoop.fs.s3a.endpoint=http://myminio-hl.minio-tenant.svc.cluster.local:9000 \
@@ -94,8 +117,8 @@ cd ../../spark
     --conf spark.hadoop.fs.s3a.path.style.access=true \
     --conf spark.hadoop.fs.s3a.impl=org.apache.hadoop.fs.s3a.S3AFileSystem \
     s3a://mybucket/graphalytics-platforms-graphx-0.2-SNAPSHOT-default.jar \
-    s3a://mybucket/$outputpath/${vertex_file} \
-    s3a://mybucket/$outputpath/${edge_file} \
-    $directed \
-    s3a://mybucket/$outputpath/output \
+    s3a://mybucket/${outputpath}/${vertex_file} \
+    s3a://mybucket/${outputpath}/${edge_file} \
+    "$directed" \
+    s3a://mybucket/${outputpath}/output \
     "${spark_args[@]}"

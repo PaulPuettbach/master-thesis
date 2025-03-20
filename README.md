@@ -8,6 +8,8 @@ make java code
 call javac on te file  
 take the resulting class file and any other things you need with it and call
 jar cf jar-file input-file(s)
+
+delte the target dir
 mvn clean package -DskipTests -Dmaven.buildNumber.skip
 
 #what i changed so far
@@ -54,7 +56,7 @@ find size for the graphs in benchmark/config_template/benchmarks
 use "time" the bash command for the ttc "real" user is cpu time spend in the user space and then sys is the time spend in kernal space
 
 
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!! important have to check if i can keep queing stuff to nodes that are oom should be fine just have them pending n shit i guess
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!! important have to check if i can keep queing stuff to nodes that are oom should be fine just have them pending n 
 
 also the k for the sliding window i dependent on the current queue length which is the numnber of pending pods divided by the number of nodes
 
@@ -65,13 +67,19 @@ export PATH=$PATH:$HOME/minio-binaries/
 step two different console
 kubectl port-forward svc/myminio-hl 9000 -n minio-tenant
 
+kubectl get pods -n spark-namespace -o jsonpath='{range .items[?(@.status.conditions[*].reason=="Unschedulable")]}{.metadata.name}{"\n"}{end}'
+
+
 step three
 mc alias set myminio http://localhost:9000 minio minio123 --insecure
 
 option after
 mc mb myminio/mybucket --insecure
 
-mc cp --recursive --insecure /mnt/d/mystuff2/master_thesis/src/benchmark/toUpload/graphs/test-bfs-directed myminio/mybucket/
+mc cp --recursive --insecure /mnt/d/mystuff2/master_thesis/src/benchmark/toUpload/graphs myminio/mybucket/
+
+or this
+mc cp --recursive --insecure /mnt/c/Users/paulp/Documents/my_stuff/comp_sci_master/master-thesis/src/benchmark/toUpload/graphs myminio/mybucket/
 
 mc rm --insecure myminio/mybucket/
 
