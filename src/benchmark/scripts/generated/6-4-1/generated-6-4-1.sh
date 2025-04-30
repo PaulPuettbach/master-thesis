@@ -50,7 +50,7 @@ submit_work () {
   pipe=/tmp/$name
   mkfifo $pipe
   (time ./spark-submit.sh $tenant $algorithm $number_of_executors $graph $graphsize $scheduler $name) 2> >(tee $pipe >/dev/null) &
-  
+
   while [[ $(kubectl get pods -n spark-namespace -l spark-app-name=$name,spark-role=executor --output name | wc -l) -eq 0 ]]
   do
   #poll every 4 seconds
@@ -78,30 +78,32 @@ submit_work () {
     fi
   fi
 }
-sleep 0.04432235693447884
+sleep 0.009972389720452073
 (
-return_values=$(submit_work melia cdlp 3 test-cdlp-directed test_graphs $scheduler 0 0 "melia-cdlp-test-cdlp-directed")
+return_values=$(submit_work ellie wcc 3 test-wcc-directed test_graphs $scheduler 0 0 "ellie-wcc-test-wcc-directed")
 if [[ $? -ne 0 ]]
 then
-  echo "error this is the return values"
+  echo "an error occured this is the return value"
   echo "$return_values"
   #exit 77 exit all subshells
   exit 12
 fi
 IFS=' ' read -r ttc name <<< "$return_values"
-echo "$ttc" >> generated/6-3-1/time.txt
+echo "$ttc" >> generated/6-4-1/time.txt
 timestamps=$(kubectl get pods --namespace spark-namespace -l spark-app-name=${name} -o json | jq -r '.items[] | "\(.metadata.creationTimestamp),\(.status.conditions[]? | select(.type=="PodScheduled").lastTransitionTime)"')
 for timestamp in $timestamps; do
   IFS=',' read -r timestamp_created timestamp_scheduled <<< "$timestamp"
   timestamp_created_formated=$(date -d "$timestamp_created" +%s)
   timestamp_scheduled_formated=$(date -d "$timestamp_scheduled" +%s)
-  echo -n $timestamp_created_formated >> generated/6-3-1/melia_times.txt
-  echo -n ", " >> generated/6-3-1/melia_times.txt
-  echo $timestamp_scheduled_formated >> generated/6-3-1/melia_times.txt
+  echo -n $timestamp_created_formated >> generated/6-4-1/ellie_times.csv
+  echo -n "," >> generated/6-4-1/ellie_times.csv
+  echo $timestamp_scheduled_formated >> generated/6-4-1/ellie_times.csv
 done
 kubectl delete pods $(kubectl get pods -n spark-namespace -l spark-app-name=${name} --field-selector=status.phase!=Failed -o jsonpath='{.items[*].metadata.name}') -n spark-namespace
-mc --insecure rm  myminio/mybucket/graphs/test_graphs/test-cdlp-directed/output/ --recursive --force
+mc --insecure rm  myminio/mybucket/graphs/test_graphs/test-wcc-directed/output/ --recursive --force
 ) &
 #----------------------------------------------------------------
 wait
+
+sort -o generated/6-4-1/ellie_times.csv -t, -k1,1 generated/6-4-1/ellie_times.csv
 ./cleanup.sh $scheduler

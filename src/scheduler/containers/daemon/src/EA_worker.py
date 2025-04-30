@@ -317,7 +317,7 @@ def fairness(genotype):
                 current_tenant_ids[gene.tasksqueue[task_queue_position- 1].tenant.id][0] = current_tenant_ids[gene.tasksqueue[task_queue_position- 1].tenant.id][0] + task_queue_position
                 current_tenant_ids[gene.tasksqueue[task_queue_position- 1].tenant.id][1] = current_tenant_ids[gene.tasksqueue[task_queue_position- 1].tenant.id][1] + 1
 
-    #mean squared error from mean taskqueue sum
+    #mean error from mean taskqueue sum
 
     #values tasknumber divided by sum of taskposition list of number between 0 and 1 1 is best
     normalized_fairness = list(map(lambda x: x[1]/x[0], current_tenant_ids.values()))

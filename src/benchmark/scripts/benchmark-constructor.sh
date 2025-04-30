@@ -37,6 +37,7 @@ cd ../..
 
 ./init.sh $scheduler
 
+trap 'echo "Interrupt received, stopping jobs..."; kill $(jobs -p); exit 1' SIGINT SIGTERM
 submit_work () {
   local tenant=$1
   local algorithm=$2
@@ -71,12 +72,9 @@ submit_work () {
       name="${name}_2"
     fi
   fi
-  pipe=/tmp/$name
-  mkfifo $pipe
-  #( time ( ./spark-submit.sh $tenant $algorithm $number_of_executors $graph $graphsize $scheduler $name; ) 2> $pipe) &
-  ( ./spark-submit.sh $tenant $algorithm $number_of_executors $graph $graphsize $scheduler $name; ) &
-  time_pid=$!
-  ( time wait $time_pid ) 2> "$pipe" &
+  local pipe
+  pipe=$(mktemp /tmp/${name}.XXXXXX)
+  (time ./spark-submit.sh $tenant $algorithm $number_of_executors $graph $graphsize $scheduler $name) 2> >(tee $pipe >/dev/null) &
 
   while [[ $(kubectl get pods -n spark-namespace -l spark-app-name=$name,spark-role=executor --output name | wc -l) -eq 0 ]]
   do
@@ -84,16 +82,21 @@ submit_work () {
     sleep 4
   done
   #need to redirect the output to nothign lest it override the ttc and name
-  kubectl wait --for=condition=Ready -n spark-namespace pods -l spark-app-name=$name,spark-role=executor --timeout=60s >/dev/null
+  kubectl wait --for=condition=Ready -n spark-namespace pods -l spark-app-name=$name,spark-role=executor --timeout=60s >/dev/null 2>&1
   if [ $? -eq 0 ]
   then
-    read ttc < $pipe
+    while [[ ! -s "$pipe" ]] 
+    do
+      sleep 1
+    done
+    local ttc
+    ttc=$(grep 'real' "$pipe" | awk '{print $2}')
     rm -f $pipe
-    ttc=$(echo "$ttc" | awk '/real/ {print $2}')
-    echo "$ttc $name"
+    echo $ttc $name
+    return 0
   else
     rm -f $pipe
-    kubectl delete pods -l spark-app-name=$name --field-selector=status.phase!=Failed -n spark-namespace
+    kubectl delete pods -l spark-app-name=$name -n spark-namespace > /dev/null 2>&1
     sleep $whole_backoff
     return_values=$(submit_work "$tenant" "$algorithm" "$number_of_executors" "$graph" "$graphsize" "$scheduler" "$add_to_backoff" "$((max_try + 1))" "$name")
     if [[ $? -eq 0 ]]
@@ -101,6 +104,7 @@ submit_work () {
       echo "$return_values"
       return 0
     else
+      echo "an error ocurred"
       return 1
     fi
   fi
@@ -153,34 +157,26 @@ for (( i=1; i<=n_runs; i++ )); do
   echo "return_values=\$(submit_work $random_tenant $random_algorithm 3 $random_graph $random_graphsize \$scheduler 0 0 \"${random_tenant}-${random_algorithm}-${random_graph}\")" >> $benchmark
   echo "if [[ \$? -ne 0 ]]" >> $benchmark
   echo "then" >> $benchmark
+  echo "  echo \"an error occured this is the return value\"" >> $benchmark
   echo "  echo \"\$return_values\"" >> $benchmark
   echo "  #exit 77 exit all subshells" >> $benchmark
   echo "  exit 12" >> $benchmark
   echo "fi" >> $benchmark
-  echo "read ttc name <<< \"\$return_values\"" >> $benchmark
-  echo "echo \"\$ttc\" >> generated/$n_tenant-$rate-$n_runs/time.txt" >> $benchmark
+  echo "IFS=' ' read -r ttc name <<< \"\$return_values\"" >> $benchmark
+   echo "ttc_formated=\$(date -d \"\$ttc\" +%s)" >> $benchmark
+  echo "echo \"\$ttc_formated\" >> generated/$n_tenant-$rate-$n_runs/time.txt" >> $benchmark
 
-  echo "timestamps_scheduled=\$(kubectl get pods --namespace spark-namespace -l spark-app-name=\${name} -o jsonpath='{range .items[*]}{.status.conditions[?(@.type==\"PodScheduled\")].lastTransitionTime},{end}'| tr ',' \", \")" >> $benchmark
-  echo "timestamps_scheduled=\"\${timestamps_scheduled%,}\"" >> $benchmark
-  echo "IFS=',' read -ra timestamps_scheduled_array <<< \"\$timestamps_scheduled\"" >> $benchmark
+  echo "timestamps=\$(kubectl get pods --namespace spark-namespace -l spark-app-name=\${name} -o json | jq -r '.items[] | \"\\(.metadata.creationTimestamp),\\(.status.conditions[]? | select(.type==\"PodScheduled\").lastTransitionTime)\"')" >> $benchmark
+  echo "for timestamp in \$timestamps; do" >> $benchmark
+  echo "  IFS=',' read -r timestamp_created timestamp_scheduled <<< \"\$timestamp\"" >> $benchmark
+  echo "  timestamp_created_formated=\$(date -d \"\$timestamp_created\" +%s)" >> $benchmark
+  echo "  timestamp_scheduled_formated=\$(date -d \"\$timestamp_scheduled\" +%s)" >> $benchmark
 
-  echo "timestamps_created=\$(kubectl get pods --namespace spark-namespace -l spark-app-name=\${name} -o jsonpath='{range .items[*]}{.metadata.creationTimestamp},{end}'| tr ',' \", \")" >> $benchmark
-  echo "timestamps_created=\"\${timestamps_created%,}\"" >> $benchmark
-  echo "IFS=',' read -ra timestamps_created_array <<< \"\$timestamps_created\"" >> $benchmark
-  
-  echo "echo "timestamps scheduled" >> generated/$n_tenant-$rate-$n_runs/${random_tenant}_times.txt" >> $benchmark
-  echo "for timestamp in \"\${timestamps_scheduled_array[@]}\"; do" >> $benchmark
-  echo "  tse_scheduled=\$(date -d \"\$timestamp\" +%s)" >> $benchmark
-  echo "  echo \$tse_scheduled >> generated/$n_tenant-$rate-$n_runs/${random_tenant}_times.txt" >> $benchmark
+  echo "  echo -n \$timestamp_created_formated >> generated/$n_tenant-$rate-$n_runs/${random_tenant}_times.csv" >> $benchmark
+  echo "  echo -n \",\" >> generated/$n_tenant-$rate-$n_runs/${random_tenant}_times.csv" >> $benchmark
+  echo "  echo \$timestamp_scheduled_formated >> generated/$n_tenant-$rate-$n_runs/${random_tenant}_times.csv" >> $benchmark
   echo "done" >> $benchmark
-
-  echo "echo "timestamps created" >> generated/$n_tenant-$rate-$n_runs/${random_tenant}_times.txt" >> $benchmark
-  echo "for timestamp in \"\${timestamps_created_array[@]}\"; do" >> $benchmark
-  echo "  tse_created=\$(date -d \"\$timestamp\" +%s)" >> $benchmark
-  echo "  echo \$tse_created >> generated/$n_tenant-$rate-$n_runs/${random_tenant}_times.txt" >> $benchmark
-  echo "done" >> $benchmark
-  echo "kubectl delete pods \$(kubectl get pods -n spark-namespace -l spark-app-name=\${name} --field-selector=status.phase!=Failed -o jsonpath='{.items[*].metadata.name}') -n spark-namespace" >> $benchmark
-  echo "mc --insecure rm  myminio/mybucket/graphs/${random_graphsize}/${random_graph}/output/ --recursive --force" >> $benchmark
+  echo "kubectl delete pods -l "spark-app-name=${name},spark-role=driver" -n spark-namespace" >> $benchmark
   # # loading_bar="{"
   # # progress=$(( (60/n_runs )*i ))
   # # echo "this is the progress $progress"
@@ -206,7 +202,8 @@ done
 #echo "(time_spent_pending / n_pending) >> fairness.txt" >> $benchmark 
 # | tr ',' \"\\n\"
 echo "#----------------------------------------------------------------" >> $benchmark
-echo "wait" >> $benchmark 
+echo "wait" >> $benchmark
+echo "sort -o generated/$n_tenant-$rate-$n_runs/${random_tenant}_times.csv -t, -k1,1 generated/$n_tenant-$rate-$n_runs/${random_tenant}_times.csv" >> $benchmark
 echo "./cleanup.sh \$scheduler" >> $benchmark 
 #take the mean squared error per tenant, error from is the average wait time normalized with currently pending pods
 #(queue length) at the time they are meassured

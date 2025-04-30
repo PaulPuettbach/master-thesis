@@ -1,6 +1,6 @@
 #!/bin/bash
 
-
+exec > /dev/null 2>&1
 export PATH=$PATH:$HOME/minio-binaries/
 if [ $# -ne 7 ]
 then
@@ -16,7 +16,7 @@ size_of_graph=$5
 scheduler=$6
 name=$7
 #buckets dont work well with hyphens in the name for some reason so paramter expansion and replacing 
-outputpath="graphs/$size_of_graph/$graph/"
+outputpath="graphs/$size_of_graph/$graph"
 
 file="../config-template/graphs/$graph.properties"
 if [ ! -f "$file" ]; then
@@ -95,7 +95,7 @@ esac
 
 cd ../../spark
 
-
+mc --insecure rm  myminio/mybucket/${outputpath}/${name}/output/ --recursive --force
 
 ./spark-3.5.0-bin-hadoop3/bin/spark-submit \
     --master k8s://localhost:6443 \
@@ -120,5 +120,5 @@ cd ../../spark
     s3a://mybucket/${outputpath}/${vertex_file} \
     s3a://mybucket/${outputpath}/${edge_file} \
     "$directed" \
-    s3a://mybucket/${outputpath}/output \
+    s3a://mybucket/${outputpath}/${name}/output \
     "${spark_args[@]}"
