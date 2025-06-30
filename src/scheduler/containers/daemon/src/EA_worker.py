@@ -546,8 +546,8 @@ def del_tasks_from_genotype():
         for gene in [gene for genotype in population.population_array for gene in genotype._gene_array]:
             try:
                 gene.tasksqueue.remove(task)
-            except ValueError:
-                print(f"encountered error with this tasks removing {task.id}", flush=True)
+            except ValueError as e:
+                #print(f"encountered error with this tasks removing {task.id}", flush=True)
                 pass
     if not [tasks for genes in population.population_array[0]._gene_array for tasks in genes.tasksqueue]:
         with no_task.get_lock():
@@ -939,6 +939,7 @@ def epoch():
 
 """Egress"""
 def update_solution(solution):
+    print("sending out an update", flush=True)
     url = f"http://{main_service}/update-solution"
     json_obj = {"fitness": solution.fitnessvalue}
     for gene in solution._gene_array:
@@ -1040,7 +1041,7 @@ def update():
     global tasks_arrived
     global update_q
     incoming_task = request.json
-    print(f"this is the id when ingress update {int(incoming_task[list(incoming_task)[0]])}", flush=True)
+    print(f"this is the incoming task {incoming_task}", flush=True)
     with thread_lock_update_q:
         update_q.append(incoming_task)
         tasks_arrived.set()

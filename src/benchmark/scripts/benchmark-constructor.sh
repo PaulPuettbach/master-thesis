@@ -48,28 +48,27 @@ submit_work () {
   local add_to_backoff=$7
   local max_try=$8
   local name=$9
-  if (( max_try >= 2 ))
+  if (( max_try >= 5 ))
   then
     echo "failed due to congestion"
     return 1
   fi
 
-  local backoff=$((1 + $RANDOM % 10))
-  ((add_to_backoff+=3))
+  local backoff=$((1 + $RANDOM % 20))
   whole_backoff=$((backoff+add_to_backoff))
 
   # check for duplicate names propagate the name downstream through the recursion
   name_taken=$(kubectl get pods -n spark-namespace -l spark-app-name=$name --output name | wc -l)
   if [[ $name_taken -ne 0 ]]
   then
-    if [[ $name =~ _([0-9]+$) ]]
+    if [[ $name =~ -([0-9]+$) ]]
     then
-      local base="${name%_*}"
-      local num="${name##*_}"
+      local base="${name%-*}"
+      local num="${name##*-}"
       local new_num=$(( num + 1 ))
-      name="${base}_${new_num}"
+      name="${base}-${new_num}"
     else
-      name="${name}_2"
+      name="${name}-2"
     fi
   fi
   local pipe
@@ -104,7 +103,7 @@ submit_work () {
       echo "$return_values"
       return 0
     else
-      echo "an error ocurred"
+      echo "$return_values"
       return 1
     fi
   fi
@@ -163,8 +162,7 @@ for (( i=1; i<=n_runs; i++ )); do
   echo "  exit 12" >> $benchmark
   echo "fi" >> $benchmark
   echo "IFS=' ' read -r ttc name <<< \"\$return_values\"" >> $benchmark
-   echo "ttc_formated=\$(date -d \"\$ttc\" +%s)" >> $benchmark
-  echo "echo \"\$ttc_formated\" >> generated/$n_tenant-$rate-$n_runs/time.txt" >> $benchmark
+  echo "echo \"\$ttc\" >> generated/$n_tenant-$rate-$n_runs/time.txt" >> $benchmark
 
   echo "timestamps=\$(kubectl get pods --namespace spark-namespace -l spark-app-name=\${name} -o json | jq -r '.items[] | \"\\(.metadata.creationTimestamp),\\(.status.conditions[]? | select(.type==\"PodScheduled\").lastTransitionTime)\"')" >> $benchmark
   echo "for timestamp in \$timestamps; do" >> $benchmark
@@ -172,11 +170,10 @@ for (( i=1; i<=n_runs; i++ )); do
   echo "  timestamp_created_formated=\$(date -d \"\$timestamp_created\" +%s)" >> $benchmark
   echo "  timestamp_scheduled_formated=\$(date -d \"\$timestamp_scheduled\" +%s)" >> $benchmark
 
-  echo "  echo -n \$timestamp_created_formated >> generated/$n_tenant-$rate-$n_runs/${random_tenant}_times.csv" >> $benchmark
-  echo "  echo -n \",\" >> generated/$n_tenant-$rate-$n_runs/${random_tenant}_times.csv" >> $benchmark
-  echo "  echo \$timestamp_scheduled_formated >> generated/$n_tenant-$rate-$n_runs/${random_tenant}_times.csv" >> $benchmark
+  echo "  echo \${timestamp_created_formated},\${timestamp_scheduled_formated} >> generated/$n_tenant-$rate-$n_runs/${random_tenant}_times.csv" >> $benchmark
+  echo "  echo \${timestamp_created_formated},\${timestamp_scheduled_formated} >> generated/$n_tenant-$rate-$n_runs/merged_output.csv" >> $benchmark
   echo "done" >> $benchmark
-  echo "kubectl delete pods -l "spark-app-name=${name},spark-role=driver" -n spark-namespace" >> $benchmark
+  echo "kubectl delete pods -l "spark-app-name=\${name},spark-role=driver" -n spark-namespace" >> $benchmark
   # # loading_bar="{"
   # # progress=$(( (60/n_runs )*i ))
   # # echo "this is the progress $progress"
@@ -203,7 +200,7 @@ done
 # | tr ',' \"\\n\"
 echo "#----------------------------------------------------------------" >> $benchmark
 echo "wait" >> $benchmark
-echo "sort -o generated/$n_tenant-$rate-$n_runs/${random_tenant}_times.csv -t, -k1,1 generated/$n_tenant-$rate-$n_runs/${random_tenant}_times.csv" >> $benchmark
+echo "sort -o generated/$n_tenant-$rate-$n_runs/merged_output.csv -t, -k1,1 generated/$n_tenant-$rate-$n_runs/merged_output.csv" >> $benchmark
 echo "./cleanup.sh \$scheduler" >> $benchmark 
 #take the mean squared error per tenant, error from is the average wait time normalized with currently pending pods
 #(queue length) at the time they are meassured
