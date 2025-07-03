@@ -4,6 +4,7 @@ import os
 import csv
 print ('argument list', sys.argv)
 directory = sys.argv[1]
+#like this python3 generate-results.py ./generated/10-1-1
 
 
 def format_ttc(time_str):

@@ -226,13 +226,13 @@ def schedule_from_EA(pod_meta, resource_id):
         # print(f"this is one container with this request {container.resources.requests}", flush=True)
         requested_memory += byte_unit_conversion(container.resources.requests["memory"])
 
-    print(f"this is the available node memory {available_node_memory} and the requested memory {requested_memory} for pod name {pod_meta.name} scheduling from daemon", flush=True)
 
     if available_node_memory <= requested_memory:
         #put pod into retry queue
-        print("not scheduled", flush=True)
+        #print("not scheduled", flush=True)
         node.queue.append(pod_meta)
         return True
+    print(f"this is the available node memory {available_node_memory} and the requested memory {requested_memory} for pod name {pod_meta.name} scheduling from daemon", flush=True)
     node.memory = available_node_memory - requested_memory
     schedule(pod_meta, node_name, resource_id)
 
@@ -269,12 +269,12 @@ def schedule_from_queue(resource_id):
         for container in spec_pod.containers:
             # print(f"this is one container with this request {container.resources.requests}", flush=True)
             requested_memory += byte_unit_conversion(container.resources.requests["memory"])
-        print(f"this is the available node memory {available_node_memory} and the requested memory {requested_memory} for pod name {pod_meta.name} scheduling from queue", flush=True)
 
         if available_node_memory <= requested_memory:
             #dont do anything try again once another pod finishes
-            print("not scheduled", flush=True)
+            #print("not scheduled", flush=True)
             break
+        print(f"this is the available node memory {available_node_memory} and the requested memory {requested_memory} for pod name {pod_meta.name} scheduling from queue", flush=True)
         node.queue.popleft()
         node.memory = available_node_memory - requested_memory
         schedule(pod_meta, node_name, resource_id)
@@ -321,12 +321,18 @@ def watch_pod():
                     meta.uid = event['object'].metadata.uid
                     pod_dic[pod_id] = meta
                     pod_id += 1
-        elif event['type'] == 'MODIFIED':
-            if (event['object'].status.phase == "Succeeded" or event['object'].status.phase == "Failed") and event['object'].spec.scheduler_name == "custom-scheduler":
+        elif event['type'] == 'MODIFIED' or event['type'] == 'DELETED':
+            #print("----------------------------------------------------", flush=True)
+            #print(f"this the pod name first {event['object'].metadata.name}", flush=True)
+            if (event['object'].status.phase == "Succeeded" or event['object'].status.phase == "Failed" or event['type'] == 'DELETED') and event['object'].spec.scheduler_name == "custom-scheduler":
+                #print(f"this the pod name after check for phase or deleted {event['object'].metadata.name}", flush=True)
                 if event['object'].metadata.name in pod_name_list_running:
+                    #print(f"this the pod name after check for pod_name_list_running {event['object'].metadata.name}", flush=True)
                     for pod_meta in list(pod_dic.values()):
                         if pod_meta.name == event['object'].metadata.name:
+                            #print(f"this the pod name after check if in pod_dic {event['object'].metadata.name}", flush=True)
                             pod_id_to_remove = list(pod_dic.keys())[list(pod_dic.values()).index(pod_meta)]
+                            tenantname = [x.value for x in event['object'].spec.containers[0].env if x.name == "SPARK_USER_MANUEL"][0]
                             update_worker(pod_id_to_remove, tenantname, "Succeeded")
                             pod_name_list_running.remove(pod_meta.name)
                             spec_pod = event['object'].spec
@@ -334,17 +340,18 @@ def watch_pod():
                                 #element is touple with (pod_name, resource_id)
                                 # if the pod was deleted and not scheduled before nothing is done
                                 if element[0] == pod_meta.name:
+                                    pod_name_list_scheduled.remove(element)
+                                    #print(f"this the pod name after check if in pod_name_list_scheduled {event['object'].metadata.name}", flush=True)
                                     requested_memory = 0
                                     for container in spec_pod.containers:
                                         requested_memory += byte_unit_conversion(container.resources.requests["memory"])
                                     node = resource_dic[int(element[1])]
-                                    if event['object'].status.phase == "Failed":
+                                    if event['object'].status.phase == "Failed" or event['type'] == 'DELETED':
                                         if pod_meta in node.queue: node.queue.remove(pod_meta)
                                         with deletion_lock:
-                                            if element[1] not in recent_deletions:
-                                                recent_deletions.append(element[1])
-                                                print(f"deleting this pod: {pod_meta.name}, and getting this much memory back {requested_memory}", flush=True)
-                                                node.memory += requested_memory
+                                            print(f"deleting this pod: {pod_meta.name}, and getting this much memory back {requested_memory}", flush=True)
+                                            node.memory += requested_memory
+                                            if element[1] not in recent_deletions: recent_deletions.append(element[1])
                                             break
                                     with thread_lock:
                                         print(f"success this pod: {pod_meta.name}, and getting this much memory back {requested_memory}", flush=True)
@@ -353,14 +360,13 @@ def watch_pod():
                                     break
                                 
                             break
-        elif event['type'] == 'DELETED':
-            #do nothing already handeled in the modified when the status rolls over to failed
-            continue
+            print("----------------------------------------------------", flush=True)
         else:
             #this event['type'] == 'UNKNOWN':
             print("something went wrong", flush=True)
             print(f"this is the pod event {event['type']}", flush=True)
             print(f"this pod did not work {event['object']}", flush=True)
+
 def schedule_on_node(resource_id, ids):
     #new solution found we clear all queues (from old solution) schedule as many as we can and fill up the queues
     global pod_dic
@@ -421,19 +427,24 @@ def init_worker():
             resource_dic[count + node_id] = NodeMeta(id=node_id, name=node_name, memory=node_memory, status="Available")
             to_send[count + node_id] = node_name
     node_id = count + node_id
-    response = requests.post(url, json = to_send)
-    if response.status_code < 400:
-        return response
-    else:
-        print(f"Request failed with status code {response.status_code}", flush=True)
-
+    #even with init container sometimes the init call gets lost to the void for some reason this makes it more robust
+    for i in range(5):
+        try:
+            response = requests.post(url, json = to_send)
+            if response.status_code < 400:
+                break
+            else:
+                print(f"Request failed with status code {response.status_code} retrying", flush=True)
+        except Exception as e:
+            print(f"Init request failed: {e} retrying", flush=True)
+            sleep(2)
 def update_worker(id, tenant, status):
     global best_fitness
     with thread_lock:
         best_fitness = 0
     url = f"http://{worker_service}/update"
     json_obj = {"id": id, "tenant": tenant, "status": status}
-    #print(f"updating daemon with this id {id}", flush=True)
+    print(f"updating daemon with this id {id}, and this tenant {tenant}", flush=True)
     response = requests.post(url, json = json_obj)
     if response.status_code < 400:
         return response

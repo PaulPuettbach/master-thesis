@@ -24,13 +24,27 @@ submit_work () {
   local add_to_backoff=$7
   local max_try=$8
   local name=$9
-  if (( max_try >= 2 ))
+  if (( max_try >= 1 ))
   then
     echo "failed due to congestion"
     return 1
   fi
-
-  local backoff=$((1 + $RANDOM % 10))
+  retry() {
+    rm -f $pipe
+    kubectl delete pods -l spark-app-name=$name -n spark-namespace > /dev/null 2>&1
+    sleep $whole_backoff
+    return_values=$(submit_work "$tenant" "$algorithm" "$number_of_executors" "$graph" "$graphsize" "$scheduler" "$add_to_backoff" "$((max_try + 1))" "$name")
+    if [[ $? -eq 0 ]]
+    then
+      echo "$return_values"
+      return 0
+    else
+      echo "$return_values"
+      return 1
+    fi
+  }
+  local backoff=$((1 + $RANDOM % 20))
+  ((add_to_backoff+=3))
   whole_backoff=$((backoff+add_to_backoff))
 
   # check for duplicate names propagate the name downstream through the recursion
@@ -50,43 +64,63 @@ submit_work () {
   local pipe
   pipe=$(mktemp /tmp/${name}.XXXXXX)
   (time ./spark-submit.sh $tenant $algorithm $number_of_executors $graph $graphsize $scheduler $name) 2> >(tee $pipe >/dev/null) &
-
+  local timeout=120
+  local elapsed=0
+  #this really checks if the driver is scheduled since no driver = no executor
   while [[ $(kubectl get pods -n spark-namespace -l spark-app-name=$name,spark-role=executor --output name | wc -l) -eq 0 ]]
   do
   #poll every 4 seconds
-    sleep 4
-  done
-  #need to redirect the output to nothign lest it override the ttc and name
-  kubectl wait --for=condition=Ready -n spark-namespace pods -l spark-app-name=$name,spark-role=executor --timeout=60s >/dev/null 2>&1
-  if [ $? -eq 0 ]
-  then
-    while [[ ! -s "$pipe" ]] 
-    do
-      sleep 1
-    done
-    local ttc
-    ttc=$(grep 'real' "$pipe" | awk '{print $2}')
-    rm -f $pipe
-    echo $ttc $name
-    return 0
-  else
-    rm -f $pipe
-    kubectl delete pods -l spark-app-name=$name -n spark-namespace > /dev/null 2>&1
-    sleep $whole_backoff
-    return_values=$(submit_work "$tenant" "$algorithm" "$number_of_executors" "$graph" "$graphsize" "$scheduler" "$add_to_backoff" "$((max_try + 1))" "$name")
-    if [[ $? -eq 0 ]]
-    then
-      echo "$return_values"
-      return 0
-    else
-      echo "an error ocurred"
-      return 1
+    if (( elapsed >= timeout )); then
+      retry
+      return $?
     fi
-  fi
+    sleep 4
+    ((elapsed+=4))
+  done
+  #while [[ $(kubectl get pods -n spark-namespace -l spark-app-name=$name,spark-role=executor -o jsonpath='{.items[*].status.conditions[?(@.type=="Ready")].status}' | wc -l) -le 1 ]]
+  #need to redirect the output to nothign lest it override the ttc and name
+  #little annoying since it forces all executors that are created to be running while somtimes just one is fine the issue is it might create more executors that specified further bogging doen the system
+  local timeout=120
+  local elapsed=0
+  while [[ $(kubectl get pods -n spark-namespace -l spark-app-name=$name,spark-role=executor --field-selector status.phase=Running --output name | wc -l) -eq 1 ]]
+  do
+  #poll every 4 seconds
+    if (( elapsed >= timeout )); then
+      retry
+      return $?
+    fi
+    sleep 4
+    ((elapsed+=4))
+  done
+  while [[ ! -s "$pipe" ]] 
+  do
+    sleep 1
+  done
+  local ttc
+  ttc=$(grep 'real' "$pipe" | awk '{print $2}')
+  rm -f $pipe
+  echo $ttc $name
+  return 0
+  
+  # kubectl wait --for=condition=Ready -n spark-namespace pods -l spark-app-name=$name,spark-role=executor --timeout=30s > /dev/null 2>&1
+  # if [ $? -eq 0 ]
+  # then
+  #   while [[ ! -s "$pipe" ]] 
+  #   do
+  #     sleep 1
+  #   done
+  #   local ttc
+  #   ttc=$(grep 'real' "$pipe" | awk '{print $2}')
+  #   rm -f $pipe
+  #   echo $ttc $name
+  #   return 0
+  # else
+  #   retry
+  # fi
 }
-sleep 0.5891350989045855
+sleep 0.7037657070557027
 (
-return_values=$(submit_work ava sssp 3 test-sssp-undirected test_graphs $scheduler 0 0 "ava-sssp-test-sssp-undirected")
+return_values=$(submit_work ezra bfs 3 test-bfs-undirected test_graphs $scheduler 0 0 "ezra-bfs-test-bfs-undirected")
 if [[ $? -ne 0 ]]
 then
   echo "an error occured this is the return value"
@@ -101,7 +135,7 @@ for timestamp in $timestamps; do
   IFS=',' read -r timestamp_created timestamp_scheduled <<< "$timestamp"
   timestamp_created_formated=$(date -d "$timestamp_created" +%s)
   timestamp_scheduled_formated=$(date -d "$timestamp_scheduled" +%s)
-  echo ${timestamp_created_formated},${timestamp_scheduled_formated} >> generated/10-1-1/ava_times.csv
+  echo ${timestamp_created_formated},${timestamp_scheduled_formated} >> generated/10-1-1/ezra_times.csv
   echo ${timestamp_created_formated},${timestamp_scheduled_formated} >> generated/10-1-1/merged_output.csv
 done
 kubectl delete pods -l spark-app-name=${name},spark-role=driver -n spark-namespace

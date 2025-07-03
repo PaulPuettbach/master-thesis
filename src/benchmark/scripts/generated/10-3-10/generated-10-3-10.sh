@@ -29,7 +29,20 @@ submit_work () {
     echo "failed due to congestion"
     return 1
   fi
-
+  retry() {
+    rm -f $pipe
+    kubectl delete pods -l spark-app-name=$name -n spark-namespace > /dev/null 2>&1
+    sleep $whole_backoff
+    return_values=$(submit_work "$tenant" "$algorithm" "$number_of_executors" "$graph" "$graphsize" "$scheduler" "$add_to_backoff" "$((max_try + 1))" "$name")
+    if [[ $? -eq 0 ]]
+    then
+      echo "$return_values"
+      return 0
+    else
+      echo "$return_values"
+      return 1
+    fi
+  }
   local backoff=$((1 + $RANDOM % 20))
   ((add_to_backoff+=3))
   whole_backoff=$((backoff+add_to_backoff))
@@ -51,15 +64,17 @@ submit_work () {
   local pipe
   pipe=$(mktemp /tmp/${name}.XXXXXX)
   (time ./spark-submit.sh $tenant $algorithm $number_of_executors $graph $graphsize $scheduler $name) 2> >(tee $pipe >/dev/null) &
-  # ttc=$(cat $pipe)
-  # ttc=$(echo $ttc | awk '/real/ {print $2}')
-  # rm -f $pipe
-  # echo $ttc $name
-
+  local timeout=40
+  local elapsed=0
   while [[ $(kubectl get pods -n spark-namespace -l spark-app-name=$name,spark-role=executor --output name | wc -l) -eq 0 ]]
   do
   #poll every 4 seconds
+    if (( waited >= wait_timeout )); then
+      retry
+      return $?
+    fi
     sleep 4
+    ((waited+=4))
   done
   #need to redirect the output to nothign lest it override the ttc and name
   kubectl wait --for=condition=Ready -n spark-namespace pods -l spark-app-name=$name,spark-role=executor --timeout=30s > /dev/null 2>&1
@@ -75,18 +90,7 @@ submit_work () {
     echo $ttc $name
     return 0
   else
-    rm -f $pipe
-    kubectl delete pods -l spark-app-name=$name -n spark-namespace > /dev/null 2>&1
-    sleep $whole_backoff
-    return_values=$(submit_work "$tenant" "$algorithm" "$number_of_executors" "$graph" "$graphsize" "$scheduler" "$add_to_backoff" "$((max_try + 1))" "$name")
-    if [[ $? -eq 0 ]]
-    then
-      echo "$return_values"
-      return 0
-    else
-      echo "$return_values"
-      return 1
-    fi
+    retry
   fi
 }
 (

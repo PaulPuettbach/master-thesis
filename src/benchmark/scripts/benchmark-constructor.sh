@@ -53,8 +53,22 @@ submit_work () {
     echo "failed due to congestion"
     return 1
   fi
-
+  retry() {
+    rm -f $pipe
+    kubectl delete pods -l spark-app-name=$name -n spark-namespace > /dev/null 2>&1
+    sleep $whole_backoff
+    return_values=$(submit_work "$tenant" "$algorithm" "$number_of_executors" "$graph" "$graphsize" "$scheduler" "$add_to_backoff" "$((max_try + 1))" "$name")
+    if [[ $? -eq 0 ]]
+    then
+      echo "$return_values"
+      return 0
+    else
+      echo "$return_values"
+      return 1
+    fi
+  }
   local backoff=$((1 + $RANDOM % 20))
+  ((add_to_backoff+=3))
   whole_backoff=$((backoff+add_to_backoff))
 
   # check for duplicate names propagate the name downstream through the recursion
@@ -74,14 +88,22 @@ submit_work () {
   local pipe
   pipe=$(mktemp /tmp/${name}.XXXXXX)
   (time ./spark-submit.sh $tenant $algorithm $number_of_executors $graph $graphsize $scheduler $name) 2> >(tee $pipe >/dev/null) &
-
+  local timeout=40
+  local elapsed=0
   while [[ $(kubectl get pods -n spark-namespace -l spark-app-name=$name,spark-role=executor --output name | wc -l) -eq 0 ]]
   do
   #poll every 4 seconds
+    if (( elapsed >= timeout )); then
+      retry
+      return $?
+    fi
     sleep 4
+    ((elapsed+=4))
   done
   #need to redirect the output to nothign lest it override the ttc and name
-  kubectl wait --for=condition=Ready -n spark-namespace pods -l spark-app-name=$name,spark-role=executor --timeout=60s >/dev/null 2>&1
+  #little annoying since it forces all executors that are created to be running while somtimes just one is fine the issue is it might 
+  #create more executors that specified further bogging doen the system
+  kubectl wait --for=condition=Ready -n spark-namespace pods -l spark-app-name=$name,spark-role=executor --timeout=30s > /dev/null 2>&1
   if [ $? -eq 0 ]
   then
     while [[ ! -s "$pipe" ]] 
@@ -94,18 +116,7 @@ submit_work () {
     echo $ttc $name
     return 0
   else
-    rm -f $pipe
-    kubectl delete pods -l spark-app-name=$name -n spark-namespace > /dev/null 2>&1
-    sleep $whole_backoff
-    return_values=$(submit_work "$tenant" "$algorithm" "$number_of_executors" "$graph" "$graphsize" "$scheduler" "$add_to_backoff" "$((max_try + 1))" "$name")
-    if [[ $? -eq 0 ]]
-    then
-      echo "$return_values"
-      return 0
-    else
-      echo "$return_values"
-      return 1
-    fi
+    retry
   fi
 }
 EOF

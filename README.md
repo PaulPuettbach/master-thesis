@@ -84,3 +84,5 @@ mc cp --recursive --insecure /mnt/c/Users/paulp/Documents/my_stuff/comp_sci_mast
 mc rm --insecure myminio/mybucket/
 
 tar --use-compress-program=unzstd -xvf archive.tar.zst
+
+kubectl run waitpod --namespace spark-namespace --image=busybox --restart=Never --overrides='{"apiVersion":"v1","spec":{"schedulerName":"custom-scheduler","containers":[{"name":"waitpod","image":"busybox","command":["/bin/sh","-c","sleep 60"],"env":[{"name":"SPARK_USER_MANUEL","value":"Frank"}],"resources":{"requests":{"memory":"64Mi"}}}],"restartPolicy":"Never"}}'

@@ -1033,7 +1033,13 @@ def node_change():
 
 @app.route('/health', methods=['GET'])
 def health():
-    return 'OK', 200
+    required_endpoints = {'/init', '/update', '/health'}
+    registered_endpoints = {rule.rule for rule in app.url_map.iter_rules()}
+
+    if required_endpoints.issubset(registered_endpoints):
+        return 'OK', 200
+    else:
+        return 'Service routes not ready', 50
 
 @app.route('/update', methods=['POST'])
 def update():
