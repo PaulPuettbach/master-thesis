@@ -48,7 +48,7 @@ submit_work () {
   local add_to_backoff=$7
   local max_try=$8
   local name=$9
-  if (( max_try >= 5 ))
+  if (( max_try >= 4 ))
   then
     echo "failed due to congestion"
     return 1
@@ -67,7 +67,7 @@ submit_work () {
       return 1
     fi
   }
-  local backoff=$((1 + $RANDOM % 20))
+  local backoff=$((1 + $RANDOM % 30))
   ((add_to_backoff+=3))
   whole_backoff=$((backoff+add_to_backoff))
 
@@ -88,8 +88,9 @@ submit_work () {
   local pipe
   pipe=$(mktemp /tmp/${name}.XXXXXX)
   (time ./spark-submit.sh $tenant $algorithm $number_of_executors $graph $graphsize $scheduler $name) 2> >(tee $pipe >/dev/null) &
-  local timeout=40
+  local timeout=80
   local elapsed=0
+  #this really checks if the driver is scheduled since no driver = no executor
   while [[ $(kubectl get pods -n spark-namespace -l spark-app-name=$name,spark-role=executor --output name | wc -l) -eq 0 ]]
   do
   #poll every 4 seconds
@@ -100,24 +101,30 @@ submit_work () {
     sleep 4
     ((elapsed+=4))
   done
+  #while [[ $(kubectl get pods -n spark-namespace -l spark-app-name=$name,spark-role=executor -o jsonpath='{.items[*].status.conditions[?(@.type=="Ready")].status}' | wc -l) -le 1 ]]
   #need to redirect the output to nothign lest it override the ttc and name
-  #little annoying since it forces all executors that are created to be running while somtimes just one is fine the issue is it might 
-  #create more executors that specified further bogging doen the system
-  kubectl wait --for=condition=Ready -n spark-namespace pods -l spark-app-name=$name,spark-role=executor --timeout=30s > /dev/null 2>&1
-  if [ $? -eq 0 ]
-  then
-    while [[ ! -s "$pipe" ]] 
-    do
-      sleep 1
-    done
-    local ttc
-    ttc=$(grep 'real' "$pipe" | awk '{print $2}')
-    rm -f $pipe
-    echo $ttc $name
-    return 0
-  else
-    retry
-  fi
+  #little annoying since it forces all executors that are created to be running while somtimes just one is fine the issue is it might create more executors that specified further bogging doen the system
+  local timeout=80
+  local elapsed=0
+  while [[ $(kubectl get pods -n spark-namespace -l spark-app-name=$name,spark-role=executor --field-selector status.phase=Running --output name | wc -l) -eq 0 ]]
+  do
+  #poll every 4 seconds
+    if (( elapsed >= timeout )); then
+      retry
+      return $?
+    fi
+    sleep 4
+    ((elapsed+=4))
+  done
+  while [[ ! -s "$pipe" ]] 
+  do
+    sleep 1
+  done
+  local ttc
+  ttc=$(grep 'real' "$pipe" | awk '{print $2}')
+  rm -f $pipe
+  echo $ttc $name
+  return 0
 }
 EOF
 

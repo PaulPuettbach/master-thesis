@@ -33,6 +33,7 @@ print(f"this is the mean: {mean}, the median: {median}, the mean error from the 
 
 #take the mean squared error per tenant, error from is the average wait time normalized with currently pending pods
 #(queue length) at the time they are meassured
+#one issue is the pods that get killed before beeing scheduled are still part of the system when they pod gets finished so the should be put in the file
 
 #taken from https://stackoverflow.com/questions/33503993/read-in-all-csv-files-from-a-directory-using-python
 #the issue is that i take the 
@@ -93,3 +94,5 @@ with open(aggregate_file, 'r') as aggregate:
                         counter += 1
                     mean_error_from_normalized_wait_time_per_tenant.append((tenant_name, (aggregate_error/counter)))
 print(f"this is the mean error from the normalized wait time per tenant and our metric for fairness: {mean_error_from_normalized_wait_time_per_tenant}")
+#true mean now
+AverageTenantError = sum([element[1] for element in mean_error_from_normalized_wait_time_per_tenant])/len(mean_error_from_normalized_wait_time_per_tenant)

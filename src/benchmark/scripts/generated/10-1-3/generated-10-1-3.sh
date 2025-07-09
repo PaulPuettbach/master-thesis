@@ -24,7 +24,7 @@ submit_work () {
   local add_to_backoff=$7
   local max_try=$8
   local name=$9
-  if (( max_try >= 3 ))
+  if (( max_try >= 4 ))
   then
     echo "failed due to congestion"
     return 1
@@ -43,7 +43,7 @@ submit_work () {
       return 1
     fi
   }
-  local backoff=$((1 + $RANDOM % 20))
+  local backoff=$((1 + $RANDOM % 80))
   ((add_to_backoff+=3))
   whole_backoff=$((backoff+add_to_backoff))
 
@@ -64,7 +64,7 @@ submit_work () {
   local pipe
   pipe=$(mktemp /tmp/${name}.XXXXXX)
   (time ./spark-submit.sh $tenant $algorithm $number_of_executors $graph $graphsize $scheduler $name) 2> >(tee $pipe >/dev/null) &
-  local timeout=120
+  local timeout=80
   local elapsed=0
   #this really checks if the driver is scheduled since no driver = no executor
   while [[ $(kubectl get pods -n spark-namespace -l spark-app-name=$name,spark-role=executor --output name | wc -l) -eq 0 ]]
@@ -80,9 +80,9 @@ submit_work () {
   #while [[ $(kubectl get pods -n spark-namespace -l spark-app-name=$name,spark-role=executor -o jsonpath='{.items[*].status.conditions[?(@.type=="Ready")].status}' | wc -l) -le 1 ]]
   #need to redirect the output to nothign lest it override the ttc and name
   #little annoying since it forces all executors that are created to be running while somtimes just one is fine the issue is it might create more executors that specified further bogging doen the system
-  local timeout=120
+  local timeout=80
   local elapsed=0
-  while [[ $(kubectl get pods -n spark-namespace -l spark-app-name=$name,spark-role=executor --field-selector status.phase=Running --output name | wc -l) -eq 1 ]]
+  while [[ $(kubectl get pods -n spark-namespace -l spark-app-name=$name,spark-role=executor --field-selector status.phase=Running --output name | wc -l) -eq 0 ]]
   do
   #poll every 4 seconds
     if (( elapsed >= timeout )); then
@@ -102,9 +102,9 @@ submit_work () {
   echo $ttc $name
   return 0
 }
-sleep 1.0882193352336595
+sleep 0.27325594447501816
 (
-return_values=$(submit_work levi sssp 3 test-sssp-directed test_graphs $scheduler 0 0 "levi-sssp-test-sssp-directed")
+return_values=$(submit_work emma sssp 3 test-sssp-directed test_graphs $scheduler 0 0 "emma-sssp-test-sssp-directed")
 if [[ $? -ne 0 ]]
 then
   echo "an error occured this is the return value"
@@ -113,18 +113,62 @@ then
   exit 12
 fi
 IFS=' ' read -r ttc name <<< "$return_values"
-echo "$ttc" >> generated/10-1-1/time.txt
+echo "$ttc" >> generated/10-1-3/time.txt
 timestamps=$(kubectl get pods --namespace spark-namespace -l spark-app-name=${name} -o json | jq -r '.items[] | "\(.metadata.creationTimestamp),\(.status.conditions[]? | select(.type=="PodScheduled").lastTransitionTime)"')
 for timestamp in $timestamps; do
   IFS=',' read -r timestamp_created timestamp_scheduled <<< "$timestamp"
   timestamp_created_formated=$(date -d "$timestamp_created" +%s)
   timestamp_scheduled_formated=$(date -d "$timestamp_scheduled" +%s)
-  echo ${timestamp_created_formated},${timestamp_scheduled_formated} >> generated/10-1-1/levi_times.csv
-  echo ${timestamp_created_formated},${timestamp_scheduled_formated} >> generated/10-1-1/merged_output.csv
+  echo ${timestamp_created_formated},${timestamp_scheduled_formated} >> generated/10-1-3/emma_times.csv
+  echo ${timestamp_created_formated},${timestamp_scheduled_formated} >> generated/10-1-3/merged_output.csv
+done
+kubectl delete pods -l spark-app-name=${name},spark-role=driver -n spark-namespace
+) &
+sleep 0.025775311501821104
+(
+return_values=$(submit_work lucas lcc 3 test-lcc-directed test_graphs $scheduler 0 0 "lucas-lcc-test-lcc-directed")
+if [[ $? -ne 0 ]]
+then
+  echo "an error occured this is the return value"
+  echo "$return_values"
+  #exit 77 exit all subshells
+  exit 12
+fi
+IFS=' ' read -r ttc name <<< "$return_values"
+echo "$ttc" >> generated/10-1-3/time.txt
+timestamps=$(kubectl get pods --namespace spark-namespace -l spark-app-name=${name} -o json | jq -r '.items[] | "\(.metadata.creationTimestamp),\(.status.conditions[]? | select(.type=="PodScheduled").lastTransitionTime)"')
+for timestamp in $timestamps; do
+  IFS=',' read -r timestamp_created timestamp_scheduled <<< "$timestamp"
+  timestamp_created_formated=$(date -d "$timestamp_created" +%s)
+  timestamp_scheduled_formated=$(date -d "$timestamp_scheduled" +%s)
+  echo ${timestamp_created_formated},${timestamp_scheduled_formated} >> generated/10-1-3/lucas_times.csv
+  echo ${timestamp_created_formated},${timestamp_scheduled_formated} >> generated/10-1-3/merged_output.csv
+done
+kubectl delete pods -l spark-app-name=${name},spark-role=driver -n spark-namespace
+) &
+sleep 1.5579885238499913
+(
+return_values=$(submit_work ellie pr 3 test-pr-directed test_graphs $scheduler 0 0 "ellie-pr-test-pr-directed")
+if [[ $? -ne 0 ]]
+then
+  echo "an error occured this is the return value"
+  echo "$return_values"
+  #exit 77 exit all subshells
+  exit 12
+fi
+IFS=' ' read -r ttc name <<< "$return_values"
+echo "$ttc" >> generated/10-1-3/time.txt
+timestamps=$(kubectl get pods --namespace spark-namespace -l spark-app-name=${name} -o json | jq -r '.items[] | "\(.metadata.creationTimestamp),\(.status.conditions[]? | select(.type=="PodScheduled").lastTransitionTime)"')
+for timestamp in $timestamps; do
+  IFS=',' read -r timestamp_created timestamp_scheduled <<< "$timestamp"
+  timestamp_created_formated=$(date -d "$timestamp_created" +%s)
+  timestamp_scheduled_formated=$(date -d "$timestamp_scheduled" +%s)
+  echo ${timestamp_created_formated},${timestamp_scheduled_formated} >> generated/10-1-3/ellie_times.csv
+  echo ${timestamp_created_formated},${timestamp_scheduled_formated} >> generated/10-1-3/merged_output.csv
 done
 kubectl delete pods -l spark-app-name=${name},spark-role=driver -n spark-namespace
 ) &
 #----------------------------------------------------------------
 wait
-sort -o generated/10-1-1/merged_output.csv -t, -k1,1 generated/10-1-1/merged_output.csv
+sort -o generated/10-1-3/merged_output.csv -t, -k1,1 generated/10-1-3/merged_output.csv
 ./cleanup.sh $scheduler
