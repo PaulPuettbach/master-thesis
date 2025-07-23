@@ -4,7 +4,7 @@ import os
 import csv
 print ('argument list', sys.argv)
 directory = sys.argv[1]
-#like this python3 generate-results.py ./generated/10-1-1
+#like this python3 generate-results.py ./generated/10-1-1/default
 
 
 def format_ttc(time_str):
@@ -19,6 +19,7 @@ def format_ttc(time_str):
 
 """"-------------------------------this is the start of the script-------------------------------"""
 time_file=f"{directory}/time.txt"
+result_file=f"{directory}/result_summary.txt"
 with open(time_file) as f:
     lines = f.readlines()
 
@@ -27,9 +28,19 @@ mean = numpy.mean(ttc)
 median = numpy.median(ttc)
 #i also want mean error from the mean to signify spread
 error = sum(map(lambda x : abs(x - mean), ttc))/len(ttc)
-
 print(f"this is the ttc: {ttc}")
 print(f"this is the mean: {mean}, the median: {median}, the mean error from the mean to show spread: {error}")
+
+with open (result_file, 'a') as f:
+    f.write(f"----------------------------------------\n\n")
+    f.write(f" GENERAL STATISTICS\n\n")
+    f.write(f"----------------------------------------\n\n")
+    f.write(f"Mean TTC:     {mean} sec\n")
+    f.write(f"Median TTC:   {median} sec\n")
+    f.write(f"TTC Error: +- {error} sec\n")
+    f.write(f"\n\n\n")
+
+
 
 #take the mean squared error per tenant, error from is the average wait time normalized with currently pending pods
 #(queue length) at the time they are meassured
@@ -93,6 +104,25 @@ with open(aggregate_file, 'r') as aggregate:
                         aggregate_error += error
                         counter += 1
                     mean_error_from_normalized_wait_time_per_tenant.append((tenant_name, (aggregate_error/counter)))
-print(f"this is the mean error from the normalized wait time per tenant and our metric for fairness: {mean_error_from_normalized_wait_time_per_tenant}")
 #true mean now
 AverageTenantError = sum([element[1] for element in mean_error_from_normalized_wait_time_per_tenant])/len(mean_error_from_normalized_wait_time_per_tenant)
+
+#_____________________ now just formating the resul txt file __________________________________
+
+max_char_tenant_name = max(len(data[0]) for data in mean_error_from_normalized_wait_time_per_tenant + [("Tenant Name", 0)])
+collumn_width = int(max_char_tenant_name) + 3 #3 for padding
+with open (result_file, 'a') as f:
+    f.write(f"----------------------------------------\n\n")
+    f.write(f" FAIRNESS\n\n")
+    f.write(f"----------------------------------------\n\n")
+    f.write(f"mean error from the normalized wait time per tenant:\n\n")
+    f.write(f"{'_'.ljust(collumn_width, '_')}________________________\n")
+    f.write(f"{'Tenant Name'.ljust(collumn_width)}|   Error\n")
+    f.write(f"{'_'.ljust(collumn_width, '_')}|_______________________\n")
+    for data in mean_error_from_normalized_wait_time_per_tenant:
+        f.write(f"{data[0].ljust(collumn_width)}|   {data[1]}\n")
+    f.write(f"{'_'.ljust(collumn_width, '_')}|_______________________\n\n\n")
+    f.write(f"Average Tenant Error: {AverageTenantError}\n")
+    f.write(f"=========================================")
+
+

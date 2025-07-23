@@ -21,109 +21,119 @@ mkdir $n_tenant-$rate-$n_runs
 benchmark="$n_tenant-$rate-$n_runs/generated-$n_tenant-$rate-$n_runs.sh"
 
 # Start by writing the script header to the file
-cat << 'EOF' > $benchmark
+cat << EOF > $benchmark
 #!/bin/bash
 
 # This script is generated
-if [ $# -ne 1 ]
+if [ \$# -ne 1 ]
 then
     echo "the argument provided that is needed is: <scheduler>" 1>&2
     exit 1
 fi
 
-scheduler=$1
-export PATH=$PATH:$HOME/minio-binaries/
+scheduler=\$1
+tmp_file=\$(mktemp)
+export PATH=\$PATH:\$HOME/minio-binaries/
+mkdir -p \${scheduler}
 cd ../..
 
-./init.sh $scheduler
+./init.sh \$scheduler
 
-trap 'echo "Interrupt received, stopping jobs..."; kill $(jobs -p); exit 1' SIGINT SIGTERM
+trap 'echo "Interrupt received, stopping jobs..."; kill \$(jobs -p); exit 1; rm -f "\$tmp_file"' SIGINT SIGTERM
+trap 'rm -f "\$tmp_file"' EXIT
 submit_work () {
-  local tenant=$1
-  local algorithm=$2
-  local number_of_executors=$3
-  local graph=$4
-  local graphsize=$5
-  local scheduler=$6
-  local add_to_backoff=$7
-  local max_try=$8
-  local name=$9
+  local tenant=\$1
+  local algorithm=\$2
+  local number_of_executors=\$3
+  local graph=\$4
+  local graphsize=\$5
+  local scheduler=\$6
+  local add_to_backoff=\$7
+  local max_try=\$8
+  local name=\$9
   if (( max_try >= 4 ))
   then
     echo "failed due to congestion"
     return 1
   fi
+  local pipe
+  pipe=\$(mktemp /tmp/\${name}.XXXXXX)
   retry() {
-    rm -f $pipe
-    kubectl delete pods -l spark-app-name=$name -n spark-namespace > /dev/null 2>&1
-    sleep $whole_backoff
-    return_values=$(submit_work "$tenant" "$algorithm" "$number_of_executors" "$graph" "$graphsize" "$scheduler" "$add_to_backoff" "$((max_try + 1))" "$name")
-    if [[ $? -eq 0 ]]
+    rm -f \$pipe
+    timestamps=\$(kubectl get pods --namespace spark-namespace -l spark-app-name=\${name} -o json | jq -r '.items[] | (.metadata.creationTimestamp)')
+    for timestamp in \$timestamps; do   
+      timestamp_created_formated=\$(date -d "\$timestamp" +%s)
+      timestamp_scheduled_formated=\$(date +%s)  #good estimate right before deletion
+      echo 1 >> "\$tmp_file"
+      echo \${timestamp_created_formated},\${timestamp_scheduled_formated} >> generated/$n_tenant-$rate-$n_runs/\${scheduler}/merged_output.csv
+    done
+    kubectl delete pods -l spark-app-name=\$name -n spark-namespace > /dev/null 2>&1
+    sleep \$whole_backoff
+    return_values=\$(submit_work "\$tenant" "\$algorithm" "\$number_of_executors" "\$graph" "\$graphsize" "\$scheduler" "\$add_to_backoff" "\$((max_try + 1))" "\$name")
+    if [[ \$? -eq 0 ]]
     then
-      echo "$return_values"
+      echo "\$return_values"
       return 0
     else
-      echo "$return_values"
+      echo "\$return_values"
       return 1
     fi
   }
-  local backoff=$((1 + $RANDOM % 30))
+  local backoff=\$((1 + \$RANDOM % 30))
   ((add_to_backoff+=3))
-  whole_backoff=$((backoff+add_to_backoff))
+  whole_backoff=\$((backoff+add_to_backoff))
 
   # check for duplicate names propagate the name downstream through the recursion
-  name_taken=$(kubectl get pods -n spark-namespace -l spark-app-name=$name --output name | wc -l)
-  if [[ $name_taken -ne 0 ]]
+  name_taken=\$(kubectl get pods -n spark-namespace -l spark-app-name=\$name --output name | wc -l)
+  if [[ \$name_taken -ne 0 ]]
   then
-    if [[ $name =~ -([0-9]+$) ]]
+    if [[ \$name =~ -([0-9]+$) ]]
     then
-      local base="${name%-*}"
-      local num="${name##*-}"
-      local new_num=$(( num + 1 ))
-      name="${base}-${new_num}"
+      local base="\${name%-*}"
+      local num="\${name##*-}"
+      local new_num=\$(( num + 1 ))
+      name="\${base}-\${new_num}"
     else
-      name="${name}-2"
+      name="\${name}-2"
     fi
   fi
-  local pipe
-  pipe=$(mktemp /tmp/${name}.XXXXXX)
-  (time ./spark-submit.sh $tenant $algorithm $number_of_executors $graph $graphsize $scheduler $name) 2> >(tee $pipe >/dev/null) &
+  (time ./spark-submit.sh \$tenant \$algorithm \$number_of_executors \$graph \$graphsize \$scheduler \$name) 2> >(tee \$pipe >/dev/null) &
   local timeout=80
   local elapsed=0
   #this really checks if the driver is scheduled since no driver = no executor
-  while [[ $(kubectl get pods -n spark-namespace -l spark-app-name=$name,spark-role=executor --output name | wc -l) -eq 0 ]]
+  while [[ \$(kubectl get pods -n spark-namespace -l spark-app-name=\$name,spark-role=executor --output name | wc -l) -eq 0 ]]
   do
   #poll every 4 seconds
     if (( elapsed >= timeout )); then
       retry
-      return $?
+      return \$?
     fi
     sleep 4
     ((elapsed+=4))
   done
-  #while [[ $(kubectl get pods -n spark-namespace -l spark-app-name=$name,spark-role=executor -o jsonpath='{.items[*].status.conditions[?(@.type=="Ready")].status}' | wc -l) -le 1 ]]
+  #while [[ \$(kubectl get pods -n spark-namespace -l spark-app-name=\$name,spark-role=executor -o jsonpath='{.items[*].status.conditions[?(@.type=="Ready")].status}' | wc -l) -le 1 ]]
   #need to redirect the output to nothign lest it override the ttc and name
   #little annoying since it forces all executors that are created to be running while somtimes just one is fine the issue is it might create more executors that specified further bogging doen the system
   local timeout=80
   local elapsed=0
-  while [[ $(kubectl get pods -n spark-namespace -l spark-app-name=$name,spark-role=executor --field-selector status.phase=Running --output name | wc -l) -eq 0 ]]
+  while [[ \$(kubectl get pods -n spark-namespace -l spark-app-name=\$name,spark-role=executor --field-selector status.phase=Running --output name | wc -l) -eq 0 ]]
   do
   #poll every 4 seconds
     if (( elapsed >= timeout )); then
       retry
-      return $?
+      return \$?
     fi
     sleep 4
     ((elapsed+=4))
   done
-  while [[ ! -s "$pipe" ]] 
+  while [[ ! -s "\$pipe" ]] 
   do
     sleep 1
   done
   local ttc
-  ttc=$(grep 'real' "$pipe" | awk '{print $2}')
-  rm -f $pipe
-  echo $ttc $name
+  ttc=\$(grep 'real' "\$pipe" | awk '{print \$2}')
+  rm -f \$pipe
+  echo \$ttc \$name
   return 0
 }
 EOF
@@ -180,16 +190,21 @@ for (( i=1; i<=n_runs; i++ )); do
   echo "  exit 12" >> $benchmark
   echo "fi" >> $benchmark
   echo "IFS=' ' read -r ttc name <<< \"\$return_values\"" >> $benchmark
-  echo "echo \"\$ttc\" >> generated/$n_tenant-$rate-$n_runs/time.txt" >> $benchmark
+  echo "echo \"\$ttc\" >> generated/$n_tenant-$rate-$n_runs/\${scheduler}/time.txt" >> $benchmark
 
-  echo "timestamps=\$(kubectl get pods --namespace spark-namespace -l spark-app-name=\${name} -o json | jq -r '.items[] | \"\\(.metadata.creationTimestamp),\\(.status.conditions[]? | select(.type==\"PodScheduled\").lastTransitionTime)\"')" >> $benchmark
+  echo "timestamps=\$(kubectl get pods --namespace spark-namespace -l spark-app-name=\${name} -o json | jq -r '.items[] | \"\(.metadata.creationTimestamp),\(.status.conditions? | if . == null then \"missing\" elif any(.type == \"PodScheduled\") then .[] | select(.type==\"PodScheduled\").lastTransitionTime else \"missing\" end)\"')" >> $benchmark
   echo "for timestamp in \$timestamps; do" >> $benchmark
   echo "  IFS=',' read -r timestamp_created timestamp_scheduled <<< \"\$timestamp\"" >> $benchmark
   echo "  timestamp_created_formated=\$(date -d \"\$timestamp_created\" +%s)" >> $benchmark
-  echo "  timestamp_scheduled_formated=\$(date -d \"\$timestamp_scheduled\" +%s)" >> $benchmark
+  echo "  if [[ \"\$timestamp_scheduled\" == \"missing\" ]]; then" >> $benchmark
+  echo "    echo 0 >> \"\$tmp_file\"" >> $benchmark
+  echo "    timestamp_scheduled_formated=\$(date +%s)" >> $benchmark
+  echo "  else" >> $benchmark
+  echo "    timestamp_scheduled_formated=\$(date -d \"\$timestamp_scheduled\" +%s)" >> $benchmark
+  echo "  fi" >> $benchmark
 
-  echo "  echo \${timestamp_created_formated},\${timestamp_scheduled_formated} >> generated/$n_tenant-$rate-$n_runs/${random_tenant}_times.csv" >> $benchmark
-  echo "  echo \${timestamp_created_formated},\${timestamp_scheduled_formated} >> generated/$n_tenant-$rate-$n_runs/merged_output.csv" >> $benchmark
+  echo "  echo \${timestamp_created_formated},\${timestamp_scheduled_formated} >> generated/$n_tenant-$rate-$n_runs/\${scheduler}/${random_tenant}_times.csv" >> $benchmark
+  echo "  echo \${timestamp_created_formated},\${timestamp_scheduled_formated} >> generated/$n_tenant-$rate-$n_runs/\${scheduler}/merged_output.csv" >> $benchmark
   echo "done" >> $benchmark
   echo "kubectl delete pods -l "spark-app-name=\${name},spark-role=driver" -n spark-namespace" >> $benchmark
   # # loading_bar="{"
@@ -216,10 +231,38 @@ done
 #echo "echo \$time_spent_pending >> generated/$n_tenant-$rate-$n_runs/$random_tenant-fairness.txt" >> $benchmark
 #echo "(time_spent_pending / n_pending) >> fairness.txt" >> $benchmark 
 # | tr ',' \"\\n\"
-echo "#----------------------------------------------------------------" >> $benchmark
-echo "wait" >> $benchmark
-echo "sort -o generated/$n_tenant-$rate-$n_runs/merged_output.csv -t, -k1,1 generated/$n_tenant-$rate-$n_runs/merged_output.csv" >> $benchmark
-echo "./cleanup.sh \$scheduler" >> $benchmark 
+
+cat << EOF >> $benchmark
+#----------------------------------------------------------------
+wait
+sort -o generated/$n_tenant-$rate-$n_runs/\${scheduler}/merged_output.csv -t, -k1,1 generated/$n_tenant-$rate-$n_runs/\${scheduler}/merged_output.csv
+
+failed=\$(grep -c '^1$' "\$tmp_file")
+not_scheduled=\$(grep -c '^0$' "\$tmp_file")
+
+
+printf "========================================\n\n" >> generated/$n_tenant-$rate-$n_runs/\${scheduler}/result_summary.txt
+printf "             RESULT SUMMARY             \n\n" >> generated/$n_tenant-$rate-$n_runs/\${scheduler}/result_summary.txt
+printf "========================================\n\n\n\n" >> generated/$n_tenant-$rate-$n_runs/\${scheduler}/result_summary.txt
+
+printf "Generated by Script: \${0}\n" >> generated/$n_tenant-$rate-$n_runs/\${scheduler}/result_summary.txt
+printf "Timestamp: %s\n" "\$(date '+%Y-%m-%d %H:%M:%S')" >> generated/$n_tenant-$rate-$n_runs/\${scheduler}/result_summary.txt
+printf "Parameters:\n" >> generated/$n_tenant-$rate-$n_runs/\${scheduler}/result_summary.txt
+printf "\tnumber of tenants = ${n_tenant}\n" >> generated/$n_tenant-$rate-$n_runs/\${scheduler}/result_summary.txt
+printf "\tarrival rate of spark jobs = ${rate}\n" >> generated/$n_tenant-$rate-$n_runs/\${scheduler}/result_summary.txt
+printf "\tnumber of runs = ${n_runs}\n" >> generated/$n_tenant-$rate-$n_runs/\${scheduler}/result_summary.txt
+printf "\tscheduler = \${scheduler}\n\n\n\n" >> generated/$n_tenant-$rate-$n_runs/\${scheduler}/result_summary.txt
+
+printf -- "----------------------------------------\n\n" >> generated/$n_tenant-$rate-$n_runs/\${scheduler}/result_summary.txt
+printf " FAILURE RATE \n\n" >> generated/$n_tenant-$rate-$n_runs/\${scheduler}/result_summary.txt
+printf -- "----------------------------------------\n\n" >> generated/$n_tenant-$rate-$n_runs/\${scheduler}/result_summary.txt
+printf "Failed Pods (retried): \${failed}\n" >> generated/$n_tenant-$rate-$n_runs/\${scheduler}/result_summary.txt
+printf "Not Scheduled (not retried): \${not_scheduled}\n\n\n\n" >> generated/$n_tenant-$rate-$n_runs/\${scheduler}/result_summary.txt
+
+./cleanup.sh \$scheduler
+python3 generate-results.py ./generated/$n_tenant-$rate-$n_runs/\${scheduler}
+
+EOF
 #take the mean squared error per tenant, error from is the average wait time normalized with currently pending pods
 #(queue length) at the time they are meassured
 
