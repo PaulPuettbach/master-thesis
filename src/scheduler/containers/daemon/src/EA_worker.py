@@ -181,6 +181,7 @@ class Genotype:
         for gene in self._gene_array:
             if gene.resource == resource:
                 gene.tasksqueue.append(new_task)
+                break
 
     def __str__(self):
         return f'genotype(fitness{self.fitnessvalue}, {self._gene_array})'
@@ -463,6 +464,7 @@ def update_current_resources():
                         valid_new_gene_idx = [i for i in range(len(genotype._gene_array)) if i != idx]
                         for task in gene.tasksqueue:
                             genotype._gene_array[random.choice(valid_new_gene_idx)].tasksqueue.append(task)
+                        break
                 genotype._gene_array.pop(to_remove_idx)
 
 """
@@ -513,7 +515,7 @@ def add_tasks_to_genotype():
 
 """
 input:  
-    - old_tasks ([tasks]) the old scheduled tasks at the time of the the function call
+    - nothing
 output: 
     - nothing
 constrains:
@@ -872,8 +874,6 @@ def mutation(input_array):
 def epoch():
     global poolsize
     global no_task
-    global new_tasks
-    global old_tasks
     global n_children
     global population
     global best_solution
@@ -939,7 +939,7 @@ def epoch():
 
 """Egress"""
 def update_solution(solution):
-    print("sending out an update", flush=True)
+    # print("sending out an update", flush=True)
     url = f"http://{main_service}/update-solution"
     json_obj = {"fitness": solution.fitnessvalue}
     for gene in solution._gene_array:
@@ -959,12 +959,20 @@ app = Flask(__name__)
 
 
 def update_batch():
+    #thread event set by http ingress
     global tasks_arrived
+    #global parameter
     global buffer_time
+    #lock for the update 1
     global thread_lock_update_q
+    #two multiprocessing quese used by the other process
     global new_tasks
     global old_tasks
+
+    #use its lock is also multiprocessing value
     global no_task
+
+    #used between threads also safe
     global update_q
     global n_old_tasks
     global n_new_tasks
@@ -1047,10 +1055,10 @@ def update():
     global tasks_arrived
     global update_q
     incoming_task = request.json
-    print(f"this is the incoming task {incoming_task}", flush=True)
+    # print(f"this is the incoming task {incoming_task}", flush=True)
     with thread_lock_update_q:
         update_q.append(incoming_task)
-        tasks_arrived.set()
+    tasks_arrived.set()
     return('OK', 200)
 
 def util_process():

@@ -44,6 +44,12 @@ then
 fi
 
 case $scheduler in
+    
+    random-scheduler)
+        scheduler_conf=(
+            "--conf spark.kubernetes.scheduler.name=random-scheduler"
+        )
+        ;;
 
     default)
         scheduler_conf=()
@@ -54,7 +60,7 @@ case $scheduler in
         )
         ;;
     *)
-        echo "provided <scheduler> is not one of: default, custom-scheduler" 1>&2
+        echo "provided <scheduler> is not one of: default, custom-scheduler, random-scheduler" 1>&2
         exit 1
         ;;
 esac

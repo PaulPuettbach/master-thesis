@@ -32,13 +32,9 @@ print(f"this is the ttc: {ttc}")
 print(f"this is the mean: {mean}, the median: {median}, the mean error from the mean to show spread: {error}")
 
 with open (result_file, 'a') as f:
-    f.write(f"----------------------------------------\n\n")
-    f.write(f" GENERAL STATISTICS\n\n")
-    f.write(f"----------------------------------------\n\n")
-    f.write(f"Mean TTC:     {mean} sec\n")
-    f.write(f"Median TTC:   {median} sec\n")
-    f.write(f"TTC Error: +- {error} sec\n")
-    f.write(f"\n\n\n")
+    f.write(f"Mean TTC for individual spark submits:     {mean / 1000:.4f} sec\n")
+    f.write(f"Median TTC for individual spark submits:   {median / 1000:.4f} sec\n")
+    f.write(f"TTC Error for individual spark submits: +- {error / 1000:.4f} sec\n\n\n")
 
 
 
@@ -112,6 +108,9 @@ AverageTenantError = sum([element[1] for element in mean_error_from_normalized_w
 max_char_tenant_name = max(len(data[0]) for data in mean_error_from_normalized_wait_time_per_tenant + [("Tenant Name", 0)])
 collumn_width = int(max_char_tenant_name) + 3 #3 for padding
 with open (result_file, 'a') as f:
+    f.write(f"mean_normalized_wait: {mean_normalized_wait:.4f} sec/n_pod\n")
+    f.write(f"=========================================")
+    f.write(f"\n\n\n")
     f.write(f"----------------------------------------\n\n")
     f.write(f" FAIRNESS\n\n")
     f.write(f"----------------------------------------\n\n")

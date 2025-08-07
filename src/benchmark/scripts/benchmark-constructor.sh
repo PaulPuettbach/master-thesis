@@ -41,6 +41,9 @@ cd ../..
 
 trap 'echo "Interrupt received, stopping jobs..."; kill \$(jobs -p); exit 1; rm -f "\$tmp_file"' SIGINT SIGTERM
 trap 'rm -f "\$tmp_file"' EXIT
+
+timestamp_script_started=\$(date +%s)
+
 submit_work () {
   local tenant=\$1
   local algorithm=\$2
@@ -235,6 +238,8 @@ done
 cat << EOF >> $benchmark
 #----------------------------------------------------------------
 wait
+timestamp_script_ended=\$(date +%s)
+ttc_whole=\$((timestamp_script_ended - timestamp_script_started))
 sort -o generated/$n_tenant-$rate-$n_runs/\${scheduler}/merged_output.csv -t, -k1,1 generated/$n_tenant-$rate-$n_runs/\${scheduler}/merged_output.csv
 
 failed=\$(grep -c '^1$' "\$tmp_file")
@@ -258,6 +263,10 @@ printf " FAILURE RATE \n\n" >> generated/$n_tenant-$rate-$n_runs/\${scheduler}/r
 printf -- "----------------------------------------\n\n" >> generated/$n_tenant-$rate-$n_runs/\${scheduler}/result_summary.txt
 printf "Failed Pods (retried): \${failed}\n" >> generated/$n_tenant-$rate-$n_runs/\${scheduler}/result_summary.txt
 printf "Not Scheduled (not retried): \${not_scheduled}\n\n\n\n" >> generated/$n_tenant-$rate-$n_runs/\${scheduler}/result_summary.txt
+printf -- "----------------------------------------\n\n" >> generated/$n_tenant-$rate-$n_runs/\${scheduler}/result_summary.txt
+printf " GENERAL STATISTICS\n\n"  >> generated/$n_tenant-$rate-$n_runs/\${scheduler}/result_summary.txt
+printf -- "----------------------------------------\n\n"  >> generated/$n_tenant-$rate-$n_runs/\${scheduler}/result_summary.txt
+printf "TTC for whole run: %s sec / %d:%02d min\n" "\$ttc_whole" \$((ttc_whole / 60)) \$((ttc_whole % 60)) >> generated/$n_tenant-$rate-$n_runs/\${scheduler}/result_summary.txt
 
 ./cleanup.sh \$scheduler
 python3 generate-results.py ./generated/$n_tenant-$rate-$n_runs/\${scheduler}

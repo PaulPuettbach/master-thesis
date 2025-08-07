@@ -9,6 +9,13 @@ fi
 scheduler=$1
 case $scheduler in
 
+    random-scheduler)
+        cd ../../random
+        #./load-repo.sh
+        helm install random-scheduler helm-random/ --wait
+        cd ../spark
+        ;;
+
     default)
         cd ../../spark
         ;;
@@ -20,7 +27,7 @@ case $scheduler in
         cd ../spark
         ;;
     *)
-        echo "provided <scheduler> is not one of: default, custom-scheduler" 1>&2
+        echo "provided <scheduler> is not one of: default, custom-scheduler, random-scheduler" 1>&2
         exit 1
         ;;
 esac
