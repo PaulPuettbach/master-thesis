@@ -10,8 +10,8 @@ main_component:
   service:
     name: -main-service
   image:
-    repository: main-component
-    pullPolicy: Never
+    repository: paulpuettbach/main-component
+    pullPolicy: IfNotPresent
     # Overrides the image tag whose default is the chart version.
     tag: latest
   labels:
@@ -23,8 +23,8 @@ daemon:
   service:
     name: -daemon-service
   image:
-    repository: daemon
-    pullPolicy: Never
+    repository: paulpuettbach/daemon
+    pullPolicy: IfNotPresent
     # Overrides the image tag whose default is the chart version.
     tag: latest
   labels:

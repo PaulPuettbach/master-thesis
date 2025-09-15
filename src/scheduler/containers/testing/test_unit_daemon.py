@@ -1,6 +1,7 @@
 import pytest
 import containers.daemon.src.EA_worker as src
 import threading
+from unittest.mock import patch
 import multiprocessing
 import copy
 from time import sleep
@@ -754,8 +755,10 @@ class TestParentSelection:
         assert(len(test3)==1)
         assert(all(element.fitnessvalue in [1.0, 0.5] for element in test3))
 
-class TestParticallyMappedCrossover:
-    def test_partially_mapped_crossover_basic(self):
+class TestPartiallyMappedCrossover:
+    @patch('containers.daemon.src.EA_worker.random.randint')
+    @patch('containers.daemon.src.EA_worker.random.choice')
+    def test_partially_mapped_crossover_basic(self, mock_choice, mock_randint):
         #number of tasks per node is from one parent
         #decide crossover point before that take from one parent after that
         #take from the other parent
@@ -772,40 +775,50 @@ class TestParticallyMappedCrossover:
         
         genotype1 = src.Genotype([gene1, gene2, gene3])
         genotype2 = src.Genotype([gene4, gene5, gene6])
+
+        # --- Mocking Setup ---
+        # To make the test deterministic, we control the random choices.
+        # 1. We mock `random.choice` to always select `genotype1`. This means the
+        #    child's structure (number of tasks per gene) will be inherited from parent 1.
+        mock_choice.return_value = genotype1
+
+        # 2. We mock `random.randint` to always return 1. This makes the crossover
+        #    point for each gene predictable.
+        mock_randint.return_value = 1
+
+        # --- Execution ---
         test = src.partially_mapped_crossover(genotype1,genotype2)
-        #test is 
-        #node1 2 n_of_chunks 1
-        #node2 3 n_of_chunks 1
-        #node3 3 n_of_chunks 1
 
-        
-        #there is two versions one where the chosen parent is parent 1
-        #leftover: src.Task(1, "Succeeded",tenant1), src.Task(4, "Succeeded",tenant3) src.Task(7, "Pending",tenant2) src.Task(2, "Succeeded",tenant1)
-        # test = src.Gene(src.Node(1), [src.Task(0, "Pending",tenant1), src.Task(2, "Pending",tenant1)])
-        #        src.Gene(src.Node(2), [src.Task(4, "Pending",tenant3), src.Task(3, "Pending",tenant1), src.Task(6, "Succeeded",tenant2)])
-        #        src.Gene(src.Node(3), [src.Task(7, "Pending",tenant2), src.Task(1, "Pending",tenant1), src.Task(5, "Succeeded",tenant3)])
+        # --- Assertions ---
+        # Based on our mocked values, we can predict the exact output.
+        # Expected child gene task IDs:
+        expected_gene1_tasks = [0, 2]
+        expected_gene2_tasks = [4, 3, 6]
+        expected_gene3_tasks = [7, 1, 5]
 
-        #and one version where the chosen parent is parent 2
-        #leftover: src.Task(1, "Succeeded",tenant1), src.Task(4, "Succeeded",tenant3) src.Task(7, "Pending",tenant2) src.Task(2, "Succeeded",tenant1)
-        # test = src.Gene(src.Node(1), [src.Task(2, "Pending",tenant1), src.Task(0, "Pending",tenant1)])
-        #        src.Gene(src.Node(2), [src.Task(3, "Pending",tenant1), src.Task(4, "Pending",tenant3), src.Task(6, "Succeeded",tenant2)])
-        #        src.Gene(src.Node(3), [src.Task(1, "Pending",tenant1), src.Task(7, "Pending",tenant2), src.Task(5, "Succeeded",tenant3)])
-        assert(test._gene_array[0].resource.id == 1)
-        assert(len(test._gene_array[0].tasksqueue) == 2)
-        assert(test._gene_array[0].tasksqueue[0].id in [0,2])
-        assert(test._gene_array[0].tasksqueue[1].id in [2,0])
+        child_gene1_tasks = [task.id for task in test._gene_array[0].tasksqueue]
+        child_gene2_tasks = [task.id for task in test._gene_array[1].tasksqueue]
+        child_gene3_tasks = [task.id for task in test._gene_array[2].tasksqueue]
 
-        assert(test._gene_array[1].resource.id == 2)
-        assert(len(test._gene_array[1].tasksqueue) == 3)
-        assert(test._gene_array[1].tasksqueue[0].id in [4,3])
-        assert(test._gene_array[1].tasksqueue[1].id in [3,4])
-        assert(test._gene_array[1].tasksqueue[2].id == 6)
+        # Check Gene 1
+        assert test._gene_array[0].resource.id == 1
+        assert len(child_gene1_tasks) == len(expected_gene1_tasks)
+        assert child_gene1_tasks == expected_gene1_tasks
 
-        assert(test._gene_array[2].resource.id == 3)
-        assert(len(test._gene_array[2].tasksqueue) == 3)
-        assert(test._gene_array[2].tasksqueue[0].id in [1,7])
-        assert(test._gene_array[2].tasksqueue[1].id in [7,1])
-        assert(test._gene_array[2].tasksqueue[2].id == 5)
+        # Check Gene 2
+        assert test._gene_array[1].resource.id == 2
+        assert len(child_gene2_tasks) == len(expected_gene2_tasks)
+        assert child_gene2_tasks == expected_gene2_tasks
+
+        # Check Gene 3
+        assert test._gene_array[2].resource.id == 3
+        assert len(child_gene3_tasks) == len(expected_gene3_tasks)
+        assert child_gene3_tasks == expected_gene3_tasks
+
+        # Final check: ensure all tasks are present exactly once in the child
+        all_child_tasks = child_gene1_tasks + child_gene2_tasks + child_gene3_tasks
+        assert len(all_child_tasks) == 8
+        assert sorted(all_child_tasks) == [0, 1, 2, 3, 4, 5, 6, 7]
 
     def test_partially_mapped_crossover_edge_case_1(self):
         tenant1 = src.Tenant("paul")

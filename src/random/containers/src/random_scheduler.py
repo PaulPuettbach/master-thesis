@@ -53,17 +53,16 @@ def byte_unit_conversion(input):
     p = re.compile(r'(\d+)\s*(\w+)')
     number_str, unit = p.match(input).groups()
     number = int(number_str)
-    match unit:
-        case "Ki":
-            return number * 1024
-        case "Mi":
-            return number * 1024 * 1024
-        case "K":
-            return number * 1000
-        case "M":
-            return number * 1000 * 1000
-        case _:
-            raise ValueError(f"Unknown unit: {unit}")
+    if unit == "Ki":
+        return number * 1024
+    elif unit == "Mi":
+        return number * 1024 * 1024
+    elif unit == "K":
+        return number * 1000
+    elif unit == "M":
+        return number * 1000 * 1000
+    else:
+        raise ValueError(f"Unknown unit: {unit}")
 
 
 """Logic"""
@@ -77,16 +76,13 @@ def nodes_available():
 
             eligable = True
             for condition in n.status.conditions:
-                if condition.type == 'Ready' and condition.status != 'True':
+                if (condition.type == 'Ready' and condition.status != 'True') or \
+                   (condition.type == 'MemoryPressure' and condition.status == 'True') or \
+                   (condition.type == 'DiskPressure' and condition.status == 'True') or \
+                   (condition.type == 'PIDPressure' and condition.status == 'True') or \
+                   (condition.type == 'NetworkUnavailable' and condition.status == 'True'):
                     eligable = False
-                if condition.type == 'MemoryPressure' and condition.status == 'True':
-                    eligable = False
-                if condition.type == 'DiskPressure' and condition.status == 'True':
-                    eligable = False
-                if condition.type == 'PIDPressure' and condition.status == 'True':
-                    eligable = False
-                if condition.type == 'NetworkUnavailable' and condition.status == 'True':
-                    eligable = False
+                    break
             if eligable:
                 node_name = n.metadata.name
                 node_memory = int(byte_unit_conversion(n.status.allocatable["memory"]) * 0.75)
@@ -119,16 +115,13 @@ def watch_node_conditions():
 
         eligable = True
         for condition in node.status.conditions:
-            if condition.type == 'Ready' and condition.status != 'True':
+            if (condition.type == 'Ready' and condition.status != 'True') or \
+               (condition.type == 'MemoryPressure' and condition.status == 'True') or \
+               (condition.type == 'DiskPressure' and condition.status == 'True') or \
+               (condition.type == 'PIDPressure' and condition.status == 'True') or \
+               (condition.type == 'NetworkUnavailable' and condition.status == 'True'):
                 eligable = False
-            if condition.type == 'MemoryPressure' and condition.status == 'True':
-                eligable = False
-            if condition.type == 'DiskPressure' and condition.status == 'True':
-                eligable = False
-            if condition.type == 'PIDPressure' and condition.status == 'True':
-                eligable = False
-            if condition.type == 'NetworkUnavailable' and condition.status == 'True':
-                eligable = False
+                break
         with thread_lock:
             if eligable and all(node.name != node_name for node in ready_nodes.values()):
                 node_memory = int(byte_unit_conversion(node.status.allocatable["memory"]) * 0.75)

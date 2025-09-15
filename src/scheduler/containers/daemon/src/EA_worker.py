@@ -12,24 +12,10 @@ import multiprocessing
 import copy
 
 """
-fairness based on queue are all tenants getting teh same resources
-
-locality based on observed message latency is difficult needs to be added to each task
-
-resource utilization dk how to do this one we can get state now and then guestimate i think
-enregy efficiency is also resource utilization
-
-order is init fitnesscalc parent_selection crossover mutation fitnesscalc selection parent_selection etc.
+general overview of the EA
+order is init, random-seed, fitnesscalc, parent_selection, crossover, mutation, fitnesscalc, selection, parent_selection, repeat.
 
 
-
-we do island model to preserve diversity no improvement for x generations
-
-over selection: In this method, the population is first ranked by fitness and then divided into two groups, the top x% in
-one and the remaining (100 - x)% in the other. When parents are selected, 80% of the selection operations
-choose from the first group, and the other 20% from the second.
-
-or we do:
 (mu, lambda) Selection The (mu, lamda) strategy used in Evolution Strategies where
 typically lamda>mu children are created from a population of mu parents. This
 method works on a mixture of age and fitness. The age component means
@@ -43,7 +29,7 @@ the fitness, and the best mu form the next generation
 
 init: random
 
-fitnesscalc: fitnessfunctions
+fitnesscalc: weighted sum of fitnessfunctions
 
 parent selection: k tournament selection  change k to change selection pressure without replacement and it should be fine
 
@@ -53,7 +39,6 @@ mutation : three adaptive mutation coefficents one for small step
 
 replacement: elitism 
 
-
 lambda amount of children and mue number of parents
 
 
@@ -61,17 +46,27 @@ notes from book
 we have a multimodal problem and we dont want a genetic drift
 i would argue we dont even need to exchange the individuals because the problem definition changes somewhat often anyway
 
-
-
 """
 
 
+#-------------------------------------------Logic-------------------------------------------
 
-"""Init"""
 
-
-"""Logic"""
 class Tenant:
+    """
+    tenant in the cluster
+
+    Each Tenant on the spark cluster gains its own Tenant class
+
+    Attributes:
+        name (str): the name of the tenant on the cluster
+        id (int): the unique id identifying the tenant
+        __tenant_dict (list[Tenant]): a list of all unique Tenants
+        __id_counter (int): current highest id
+
+    Methods:
+        __find_id: automatically assign the next available id for each new tenant
+    """
 
     __tenant_dict = {}
     __id_counter = -1
@@ -100,6 +95,23 @@ class Tenant:
             return Tenant.__id_counter
     
 class Task:
+    """
+    each Task/Pod 
+    
+    Each Task or Pod that is needed for the Spark cluster gains its own Task class when it is
+    marked for scheduling by the Kubernetes API
+
+    
+    Attributes:
+        id (int): unique identifying the task/pod
+        status (str): one of Pending Running Succeeded the status of the pod
+        tenant (Tenant): the Tenant of the cluster that is resposible for submitting the pod
+        migration (bool): not implemented yet for migrating the pod to another node
+        migrate_to (Node): not implemented yet for migrating the pod to another node
+    
+    Methods:
+        only python specific
+    """
     def __init__(self,id, status, tenant, migration=False, migrate_to=None):
         if not(isinstance(id, int) and id >= 0):
             raise ValueError(f"id as integer bigger or equal to 0 expected, got {id}")
@@ -140,6 +152,18 @@ class Task:
             raise ValueError(f"cant equate task to {type(other)}")
     
 class Gene:
+    """
+    Gene class represents a Node and a queue for the pod to be scheduled to the node
+    
+    In line with the EA terminology this represents a unique part of the Genotype. Each Node with all task that should be scheduled to it is represented by one Gene.
+    
+    Attributes:
+        resource (Node): Node class representing the unique node of the cluster
+        taskqueue (list[Task]): the Tasks/Pods that should be scheduled to the Node
+    
+    Methods:
+        the usual python nodes
+    """
     def __init__(self, resource, tasksqueue):
         if not isinstance(resource, Node):
             raise ValueError(f"resource should be Node, got {resource}")
@@ -162,6 +186,18 @@ class Gene:
             raise ValueError(f"cant equate gene to {type(other)}")
 
 class Genotype:
+    """
+    A compound of all Genes
+    
+    using the EA terminology for a single element of the population that contains Genes one for each Node in the cluster.
+    
+    Attributes:
+        _gene_array (type): Description of attribute1.
+        attribute2 (type): Description of attribute2.
+    
+    Methods:
+        append_task: this method will test if the task is already part of the taskqueue of any Gene in the Genotype and only add it if not
+    """
     def __init__(self, _gene_array, fitnessvalue=0.0):
         if not ((all(isinstance(gene, Gene) for gene in _gene_array)) or (len(_gene_array) == 0)) :
             raise ValueError("_gene_array should be a an empty list or contain Gene objects")
@@ -195,6 +231,17 @@ class Genotype:
             raise ValueError(f"cant equate Genotype to {type(other)}")
     
 class Population:
+    """
+    All genotypes in the pool for the EA
+    
+    a class wrapper for the pool of individual genotypes
+    
+    Attributes:
+        population_array (list[Genotype]): The complete list of all Genotypes in the pool
+    
+    Methods:
+        the usual python functions
+    """
     def __init__(self, population_array):
         if not ((all(isinstance(genotype, Genotype) for genotype in population_array)) or (len(population_array) == 0)) :
             raise ValueError("population_array should be a an empty list or contain Geneotype objects")
@@ -206,6 +253,17 @@ class Population:
         return f'Population(size: {len(self.population_array)}, first 10 genotypes: {self.population_array[0:10]})'
     
 class Node:
+    """
+    a class representation for the nodes in the cluster
+    
+    Each node of the cluster is wrapped as an object of this class.
+    
+    Attributes:
+        id (int): unique identitifyer of a node
+    
+    Methods:
+        the usual python functions
+    """
     def __init__(self,id):
         if not(isinstance(id, int) and id >= 0):
             raise ValueError(f"integer bigger or equal to 0 expected, got {id}")
@@ -242,9 +300,9 @@ k = int(math.ceil(poolsize/5))
 #hwo many crossover points for the crossover
 k_point=1
 #see mutation for explenation
-mutation_coefficient1 = 0
-mutation_coefficient2 = 0
-mutation_coefficient3 = 0
+mutation_coefficient1 = 0.01
+mutation_coefficient2 = 0.1
+mutation_coefficient3 = 0.1
 
 #need the default value for the unit tests to work
 main_service = os.getenv('MAIN-SERVICE', "did not import")
@@ -290,19 +348,30 @@ new_best = False
 
 
 
-"""
-all the fitness functions
-input:  
-    - to_eval ([Genotype]): set of Genotypes to eval for fitness
-output: 
-    - NA the input will be updated with new fitness values
-description:
-    take the input set and recalculate the fitness value. the function is :
-    fairness_coef  * fairness + local_coef * locality + res_util_coef * res_util + energy_coef * energy - scaling_pen_coef scaling_pen
 
-"""
 
 def fairness(genotype):
+    """
+    Calculates the fairness of a scheduling solution based on tenant task distribution.
+
+    This function evaluates how equitably tasks from different tenants are
+    scheduled across the nodes. It computes a normalized queue position score for
+    each tenant, which is the number of their tasks divided by the sum of their
+    queue positions (lower positions are better).
+
+    It then calculates the mean absolute deviation of these scores from the
+    overall average. The final fairness score is `1 - deviation`, where a value
+    closer to 1.0 signifies a more fair distribution among tenants.
+
+    Args:
+        genotype (Genotype): The scheduling solution to evaluate, containing
+            genes that map tasks to nodes.
+    Returns:
+        float: A fairness score between 0.0 and 1.0. A higher value indicates
+            a more fair schedule. Returns 1.0 if there are no tasks to evaluate.
+    Raises:
+        NA
+    """
     # iterate over the tasks and determine the place in queue for all tenants
     #current tenant ids is list of dictonary with the id and a tuple with count of the tasksqueue position and count of number of tasks
 
@@ -318,6 +387,10 @@ def fairness(genotype):
                 current_tenant_ids[gene.tasksqueue[task_queue_position- 1].tenant.id][0] = current_tenant_ids[gene.tasksqueue[task_queue_position- 1].tenant.id][0] + task_queue_position
                 current_tenant_ids[gene.tasksqueue[task_queue_position- 1].tenant.id][1] = current_tenant_ids[gene.tasksqueue[task_queue_position- 1].tenant.id][1] + 1
 
+    # If there are no tasks, the schedule is perfectly "fair" by definition.
+    if not current_tenant_ids:
+        return 1.0
+
     #mean error from mean taskqueue sum
 
     #values tasknumber divided by sum of taskposition list of number between 0 and 1 1 is best
@@ -330,42 +403,71 @@ def fairness(genotype):
     return 1 - error
 
 def locality(genotype):
-    #without node level metrics it might be better to just check how many of the tasks of the same tenant are on the same node
-    #calc average amount of ndoes that the tasks of the same tenant are scheduled to should be as low as possible
-    #each gene has necessarily a different resource
-    
-    #this is dictonary with tenant id as key and array of size 3. idx0: number of tasks the tenant has pending, idx1: number of nodes they are scheduled on, idx2: the last resource a pedning task was encountered
-    current_tenant_ids = {}
-    gene_counter = 0
+    """
+    Calculates the locality of a scheduling solution.
+
+    Locality is a measure of how concentrated a tenant's tasks are on a minimal
+    number of nodes. A higher locality score is better. The score is calculated
+    by first determining a "spread ratio" for each tenant, which is the number
+    of nodes their tasks are on divided by the number of tasks they have.
+
+    The final score is `1 - average_spread_ratio`, where a value closer to 1.0
+    indicates that tenants' tasks are well-concentrated.
+
+    Args:
+        genotype (Genotype): The scheduling solution to evaluate.
+    Returns:
+        float: A locality score between 0.0 and 1.0. A higher value indicates
+            better locality. Returns 1.0 if there are no tasks to evaluate.
+    Raises:
+        NA
+    """
+    tenant_stats = {}  # {tenant_id: {'task_count': int, 'nodes': set()}}
+
     for gene in genotype._gene_array:
-        for task_queue_position in range(len(gene.tasksqueue)):
-            if len(current_tenant_ids) == 0 or gene.tasksqueue[task_queue_position].tenant.id not in current_tenant_ids:
-                current_tenant_ids[gene.tasksqueue[task_queue_position].tenant.id] = [1, 1, gene_counter]
-            elif gene_counter >= current_tenant_ids[gene.tasksqueue[task_queue_position].tenant.id][2]:
-                current_tenant_ids[gene.tasksqueue[task_queue_position].tenant.id][0] = current_tenant_ids[gene.tasksqueue[task_queue_position].tenant.id][0] +1
-                if gene_counter > current_tenant_ids[gene.tasksqueue[task_queue_position].tenant.id][2]:
-                    current_tenant_ids[gene.tasksqueue[task_queue_position].tenant.id][1] = current_tenant_ids[gene.tasksqueue[task_queue_position].tenant.id][1] +1
-                    current_tenant_ids[gene.tasksqueue[task_queue_position].tenant.id][2] = gene_counter
-        gene_counter = gene_counter + 1
-    
-    #number between 0 and 1 0 being better ratio of number of resources and number of tasks  
-    noramlized_resources_per_tenant = list(map(lambda x : 0 if x[1]==1 else x[1]/x[0], current_tenant_ids.values()))
-    
-    #between 0 and 1, closer to 0 being better
-    mean_noramlized_resources_per_tenant = sum(noramlized_resources_per_tenant)/ len(current_tenant_ids)
+        for task in gene.tasksqueue:
+            tenant_id = task.tenant.id
+            if tenant_id not in tenant_stats:
+                tenant_stats[tenant_id] = {'task_count': 0, 'nodes': set()}
+            
+            tenant_stats[tenant_id]['task_count'] += 1
+            tenant_stats[tenant_id]['nodes'].add(gene.resource.id)
 
-    #should be closer to 1 is better
-    return 1 - mean_noramlized_resources_per_tenant
+    if not tenant_stats:
+        return 1.0
 
+    spread_ratios = []
+    for stats in tenant_stats.values():
+        # If all tasks are on one node, spread is 0 (best).
+        # Otherwise, calculate the ratio of nodes to tasks.
+        spread_ratios.append(0.0 if len(stats['nodes']) <= 1 else len(stats['nodes']) / stats['task_count'])
 
+    # Average spread across all tenants. Closer to 0 is better.
+    mean_spread = sum(spread_ratios) / len(spread_ratios)
 
-
+    # Invert so that 1.0 is the best score.
+    return 1.0 - mean_spread
 
 def fitness_eval(to_eval):
+    """
+    Calculates and assigns a fitness value to each genotype in a list.
+
+    The fitness is a weighted sum of the `fairness` and `locality` scores.
+    This function has a side effect of updating the global `best_solution`
+    if a genotype with a higher fitness score is found.
+
+    Args:
+        to_eval (list[Genotype]): A list of genotypes to evaluate.
+    Returns:
+        NA
+    Raises:
+        TypeError: If the input is not a list of Genotype objects.
+    """
     global fairness_coef
     global local_coef
     global best_solution
     global new_best
+
     if not isinstance(to_eval[0], Genotype):
         raise TypeError("fitness eval called with wrong parameter type")
     for genotype in to_eval:
@@ -375,22 +477,23 @@ def fitness_eval(to_eval):
             best_solution = genotype
             new_best = True
             
-    
-
-#iterate n times. N being equal to poolsize
-
-
-"""
-input:  
-    - size (int) is the number of genotypes creates
-output: 
-    - none
-constrains:
-    - the size has to fit the resource the deamon is scheduled on
-description:
-    Initialize the pool of genotypes with randomized Genotypes
-"""
 def init(size):
+    """
+    Initializes the EA population and node resources.
+
+    This function is called once at startup. It populates the list of
+    `current_resources` by reading from a queue filled by an initial HTTP
+    request. It then creates an initial `population` of `size` genotypes,
+    where each genotype contains a gene for every available resource, but with
+    empty task queues.
+
+    Args:
+        size (int): The number of genotypes to create for the initial population.
+    Returns:
+        NA
+    Raises:
+        NA
+    """
     global population
     global resources_queue
     global n_init
@@ -422,18 +525,24 @@ def init(size):
             genotype._gene_array.append(gene)
         population.population_array.append(genotype)
 
-"""
-input:  
-    - none
-output: 
-    - none
-constrains:
-    - none
-description:
-    add nodes from the queue to the current resources
-"""
-
 def update_current_resources():
+    """
+    Updates node resources dynamically during runtime.
+
+    Reads node update operations (add/delete) from a queue.
+    - 'add': A new node is added to `current_resources`, and a corresponding
+      empty gene is added to every genotype in the population.
+    - 'delete': A node is removed. For each genotype, the corresponding gene
+      is removed, and any tasks in its queue are randomly redistributed to
+      the remaining genes.
+    
+    Args:
+        NA  
+    Returns:
+        NA
+    Raises:
+        NA
+    """
     global resources_queue
     global n_node
     global current_resources
@@ -467,17 +576,22 @@ def update_current_resources():
                         break
                 genotype._gene_array.pop(to_remove_idx)
 
-"""
-input:  
-    - nothing
-output: 
-    - nothing
-constrains:
-    - none
-description:
-    Add the new not yet considered pending tasks to the population from the new task queue
-"""
 def add_tasks_to_genotype():
+    """
+    Adds new pending tasks to all genotypes in the population.
+
+    Reads tasks from the `new_tasks` queue. For each new task, it is added
+    to a randomly selected gene (node) in every genotype of the population.
+    This random placement helps maintain diversity. After adding tasks, the
+    global `best_solution` is reset as the problem definition has changed.
+    
+    Args:
+        NA  
+    Returns:
+        NA
+    Raises:
+        NA
+    """
     global population
     global new_tasks
     global best_solution
@@ -512,18 +626,22 @@ def add_tasks_to_genotype():
         with no_task.get_lock():
             no_task.value = False
 
-
-"""
-input:  
-    - nothing
-output: 
-    - nothing
-constrains:
-    - none
-description:
-    delete the old already scheduled tasks from the genotype
-"""
 def del_tasks_from_genotype():
+    """
+    Removes completed or succeeded tasks from all genotypes.
+
+    Reads tasks from the `old_tasks` queue. For each completed task, it is
+    removed from the task queue of the corresponding gene in every genotype.
+    The global `best_solution` is reset as the problem has changed. If all
+    tasks are removed, the `no_task` flag is updated.
+
+    Args:
+        NA  
+    Returns:
+        NA
+    Raises:
+        NA
+    """
     global population
     global old_tasks
     global best_solution
@@ -545,12 +663,12 @@ def del_tasks_from_genotype():
         best_solution = Genotype([])
 
         #print(f"removing this task {task.id}", flush=True)
-        for gene in [gene for genotype in population.population_array for gene in genotype._gene_array]:
-            try:
-                gene.tasksqueue.remove(task)
-            except ValueError as e:
-                #print(f"encountered error with this tasks removing {task.id}", flush=True)
-                pass
+        for genotype in population.population_array:
+            for gene in genotype._gene_array:
+                try:
+                    gene.tasksqueue.remove(task)
+                except ValueError:
+                    pass # Task was not in this gene's queue, which is expected.
     if not [tasks for genes in population.population_array[0]._gene_array for tasks in genes.tasksqueue]:
         with no_task.get_lock():
             no_task.value = True
@@ -558,19 +676,24 @@ def del_tasks_from_genotype():
         n_old_tasks.value -= rec_task_counter
 
 
-"""
-input:  
-    - n: the number of individuals to select(should be the population size of the coming epoch)
-    - to_select: the set of individuals from which to select the next population this is an array of genotypes
-output: 
-    - updated population
-description:
-    there should be mu parents and lambda children mixed together and we disregardded all the parents and must now choose among the lamda children
-    the input shoudl just be the children and we do the rest when calling the function
-"""
 def selection(n, to_select):
+    """
+    Selects the top `n` individuals from a given list using (mu, lambda) selection.
 
-    global population
+    This function implements elitist selection by choosing the `n` individuals
+    with the highest fitness scores from the `to_select` list (typically the
+    child population). It uses an efficient quickselect-style algorithm to find
+    the top `n` elements without fully sorting the entire list.
+
+    Args:
+        n (int): The number of individuals to select for the next generation.
+        to_select (list[Genotype]): The pool of individuals (e.g., children)
+            from which to select.
+    Returns:
+        list[Genotype]: A list containing the `n` fittest individuals.  
+    Raises:
+        NA
+    """
     if n > len(to_select):
         return "Error: n is greater than the size of the array."
     if n == len(to_select):
@@ -613,32 +736,35 @@ def selection(n, to_select):
     
 
 
+def parent_selection(candidate_pool):
+    """
+    Selects a pool of parents using k-tournament selection.
 
-"""
-input:  
-    - n_parents (int): is the number of parents returned
-    - k(int): how many parents are considered for each tournament increase this to increase the
-    selection pressure, has to be less than n parents otherwise it is always the top one
-    and if k ==1 it is random
-output: 
-    - a set of parents to be taken for crossover
-description:
-    find a number of parents acording to tournament selction the higher the k the higher the selection pressure
-"""
-def parent_selection(population):
+    This method runs `n_parents` tournaments. In each tournament, `k`
+    individuals are randomly sampled from the `candidate_pool`. The individual
+    with the highest fitness from that sample is selected as a parent.
+    Higher values of `k` increase selection pressure.
+
+    Args:
+        candidate_pool (list[Genotype]): The population from which to select parents.
+    Returns:
+        list[Genotype]: A list of `n_parents` selected for mating.
+    Raises:
+        NA
+    """
     global n_parents
     global k
 
     if not isinstance(n_parents, int) or not isinstance(k, int):
         raise TypeError("parent selection called with wrong parameter type")
-    if k >= len(population) or k<1 :
+    if k >= len(candidate_pool) or k<1 :
         raise ValueError(f"parent selection called with k that is bigger or equal to the size of the canidate pool or with k smaller to one got {k}")
 
     mating_pool = []
     
     for _ in range(n_parents):
         #random.sample is without replacement which is what we want random.choice is with
-        potential_mates = random.sample(population, k)
+        potential_mates = random.sample(candidate_pool, k)
         best_mate = max(potential_mates, key=lambda mate: mate.fitnessvalue)
         mating_pool.append(best_mate)
 
@@ -663,25 +789,26 @@ def parent_selection(population):
 
     
    
-"""
-input:  
-    - first parent (Genotype): the first parent for the crossover
-    - second parent(Genotype): the second parent for the crossover
-    - k_point(int): number of crossoverpoints
-output:
-    - child (Genotype): a child that is a combination of the parents
-constrains:
-    - Small changes to a genotype induce small changes in the corresponding phenotypes
-    - tasks cannot be duplicated and all tasks have to be assigned
-description:
-    has to be meaningful representation of both parents. Therefore, for each gene for the taskqueue it is important where the task is placed in what order and how many there are placed on a node.
-    To do this for each child take the number of tasks per node from one parent wholesale. For the order and what node thez are placed on take the taskqueue from both parents decide a crossoverpoint
-    and for the first tasks up to the crossover point try to take primarly from one parent and for every task after the crossover point try to take primarly from the other. The order is try to take 
-    from the desired parent if that does not work try to take from the other parent if that does not work take from the tasks that are leftover. The tasks that are leftover are updated after each gene
-    by taking all the leftover tasks from both parents and adding them to the leftover tasks.
-
-"""
 def partially_mapped_crossover(parent1, parent2):
+    """
+    Creates a child genotype using a custom partially mapped crossover.
+
+    This crossover operator is designed to combine traits from two parents
+    while ensuring all tasks are scheduled exactly once. For each gene (node),
+    the size of the task queue is inherited from one parent. The tasks to fill
+    that queue are then drawn from both parents' corresponding genes, using a
+    crossover point to decide which parent to prioritize. A bitmap is used to
+    prevent duplicate tasks, and a `leftover_tasks` list handles tasks that
+    could not be placed in their original gene context.
+
+    Args:
+        parent1 (Genotype): The first parent for crossover.
+        parent2 (Genotype): The second parent for crossover.
+    Returns:
+        Genotype: The resulting child genotype.
+    Raises:
+        NA
+    """
     global k_point
 
     if not isinstance(parent1, Genotype) or not isinstance(parent2, Genotype):
@@ -697,10 +824,10 @@ def partially_mapped_crossover(parent1, parent2):
     
     leftover_tasks = []
     #used to just use the id as the index for the bitmap but ids only increase due to some synchronization issues that were fixed and you might have 3 tasks but one of them has an index of 500 which seems
-    #wastefull to allocate so much memory in the bitmap this is a quick if hard to parse workaround the index of the id in the task_id_array is what is set and tested for the bitmap
-    task_id_array = [tasks.id for gene in parent1._gene_array for tasks in gene.tasksqueue]
+    #wastefull to allocate so much memory in the bitmap this is a quick if hard to parse workaround the index of the id in the task_id_map is what is set and tested for the bitmap
+    task_id_map = {task_obj.id: i for i, task_obj in enumerate(task_obj for gene_obj in parent1._gene_array for task_obj in gene_obj.tasksqueue)}
     # one more than number of tasks in total because id start at one and constant arithmatic is more wasterful then simply having one more unused bit
-    bm = BitMap(len(task_id_array))
+    bm = BitMap(len(task_id_map))
     gene_idx = 0
     while gene_idx < len(parent1._gene_array):
         #in case there are no tasks in the taskqueue for the resource
@@ -709,7 +836,7 @@ def partially_mapped_crossover(parent1, parent2):
             cleanup_idx = 0
             cleanup_taks = parent2._gene_array[gene_idx].tasksqueue
             while cleanup_idx < len(cleanup_taks):
-                if not bm.test(task_id_array.index(cleanup_taks[cleanup_idx].id)):
+                if not bm.test(task_id_map[cleanup_taks[cleanup_idx].id]):
                     leftover_tasks.append(cleanup_taks[cleanup_idx])
                 cleanup_idx = cleanup_idx +1
 
@@ -750,9 +877,9 @@ def partially_mapped_crossover(parent1, parent2):
             
             if child_task_idx < n_tasks_per_chunk:
                 while not task_taken and chosen_idx < len(chosen_parent_tasks):
-                    if not bm.test(task_id_array.index(chosen_parent_tasks[chosen_idx].id)):
+                    if not bm.test(task_id_map[chosen_parent_tasks[chosen_idx].id]):
                         child._gene_array[gene_idx].tasksqueue[child_task_idx] = chosen_parent_tasks[chosen_idx]
-                        bm.set(task_id_array.index(chosen_parent_tasks[chosen_idx].id))
+                        bm.set(task_id_map[chosen_parent_tasks[chosen_idx].id])
                         task_taken = True
                         chosen_idx = chosen_idx +1
                     else:
@@ -760,9 +887,9 @@ def partially_mapped_crossover(parent1, parent2):
                         continue
 
                 while not task_taken and other_idx < len(other_parent_tasks):
-                    if not bm.test(task_id_array.index(other_parent_tasks[other_idx].id)):
+                    if not bm.test(task_id_map[other_parent_tasks[other_idx].id]):
                         child._gene_array[gene_idx].tasksqueue[child_task_idx] = other_parent_tasks[other_idx]
-                        bm.set(task_id_array.index(other_parent_tasks[other_idx].id))
+                        bm.set(task_id_map[other_parent_tasks[other_idx].id])
                         task_taken = True
                         other_idx = other_idx +1
                     else:
@@ -770,9 +897,9 @@ def partially_mapped_crossover(parent1, parent2):
                         continue
             else:
                 while not task_taken and other_idx < len(other_parent_tasks):
-                    if not bm.test(task_id_array.index(other_parent_tasks[other_idx].id)):
+                    if not bm.test(task_id_map[other_parent_tasks[other_idx].id]):
                         child._gene_array[gene_idx].tasksqueue[child_task_idx] = other_parent_tasks[other_idx]
-                        bm.set(task_id_array.index(other_parent_tasks[other_idx].id))
+                        bm.set(task_id_map[other_parent_tasks[other_idx].id])
                         task_taken = True
                         other_idx = other_idx +1
                     else:
@@ -780,9 +907,9 @@ def partially_mapped_crossover(parent1, parent2):
                         continue
                 
                 while not task_taken and chosen_idx < len(chosen_parent_tasks):
-                    if not bm.test(task_id_array.index(chosen_parent_tasks[chosen_idx].id)):
+                    if not bm.test(task_id_map[chosen_parent_tasks[chosen_idx].id]):
                         child._gene_array[gene_idx].tasksqueue[child_task_idx] = chosen_parent_tasks[chosen_idx]
-                        bm.set(task_id_array.index(chosen_parent_tasks[chosen_idx].id))
+                        bm.set(task_id_map[chosen_parent_tasks[chosen_idx].id])
                         task_taken = True
                         chosen_idx = chosen_idx +1
                     else:
@@ -790,21 +917,21 @@ def partially_mapped_crossover(parent1, parent2):
                         continue
             if not task_taken:
                 for task_idx in range(len(leftover_tasks)-1):
-                    if not bm.test(task_id_array.index(leftover_tasks[task_idx].id)):
+                    if not bm.test(task_id_map[leftover_tasks[task_idx].id]):
                         child._gene_array[gene_idx].tasksqueue[child_task_idx] = leftover_tasks[task_idx]
                         leftover_tasks.pop(task_idx)
-                        bm.set(task_id_array.index(leftover_tasks[task_idx].id))
+                        bm.set(task_id_map[leftover_tasks[task_idx].id])
                         task_taken = True
                         break
             child_task_idx = child_task_idx +1
         #after this point there is guranttedd to be a task in the child queue and any leftover go to leftovers
         while chosen_idx < len(chosen_parent_tasks):
-            if not bm.test(task_id_array.index(chosen_parent_tasks[chosen_idx].id)):
+            if not bm.test(task_id_map[chosen_parent_tasks[chosen_idx].id]):
                 leftover_tasks.append(chosen_parent_tasks[chosen_idx])
             chosen_idx = chosen_idx +1
         
         while other_idx < len(other_parent_tasks):
-            if not bm.test(task_id_array.index(other_parent_tasks[other_idx].id)):
+            if not bm.test(task_id_map[other_parent_tasks[other_idx].id]):
                 leftover_tasks.append(other_parent_tasks[other_idx]   )
             other_idx = other_idx +1
         gene_idx = gene_idx +1
@@ -812,27 +939,27 @@ def partially_mapped_crossover(parent1, parent2):
     return child
 
 
-"""
-input:  
-    - input_array([Genotype]): a list of all the Genotypes that need to be mutated
-    - mutation_coefficient1(float): between 0 and 1 mutation chance for an entire taskqueue to be swapped between nodes
-    - mutation_coefficient2(float): between 0 and 1 mutation chance for each of the genes that a random task is taken and added to another node/gene
-    - mutation_coefficient3(float): between 0 and 1 mutation chance for each task to switch with another task on the same node
-output:
-    - no return value input array is mutated in place
-constrains:
-    - same order of input and output array
-description:
-    for each resource node in the schedule of each individual (genotype) there is a chance to swap one task of that resource node with the task of another
-    resource node: important to note if the second chosen node does not have any resources no further attempts are made to find another node to save compution time
-    this should be included in the determination of the mutation coefficient 
-"""
 def mutation(input_array):
+    """
+    Applies three types of mutation to a list of genotypes in-place.
+
+    1.  **Swap Queues (mutation_coefficient1)**: Swaps the entire task queue
+        between two randomly selected genes (nodes).
+    2.  **Move Task (mutation_coefficient2)**: Moves a single random task from
+        one gene's queue to another randomly selected gene's queue.
+    3.  **Swap Tasks (mutation_coefficient3)**: Swaps the position of two
+        tasks within the same gene's queue.
+
+    Args:
+        input_array (list[Genotype]): The list of genotypes to mutate.
+    Raises:
+        TypeError: If the input is not a list of Genotype objects.
+    Raises:
+        NA
+    """
     global mutation_coefficient1
     global mutation_coefficient2
     global mutation_coefficient3
-    
-
 
     if not isinstance(input_array[0], Genotype):
         raise TypeError("mutation called with wrong parameter type")
@@ -872,6 +999,20 @@ def mutation(input_array):
                                 gene.tasksqueue[switch_task_idx] = temp
 
 def epoch():
+    """
+    The main loop of the evolutionary algorithm.
+
+    This function orchestrates the entire EA lifecycle, including initialization,
+    evaluation, selection, crossover, and mutation, in an infinite loop.
+    It also handles dynamic updates to tasks and nodes.
+
+    Args:
+        NA  
+    Returns:
+        NA
+    Raises:
+        NA
+    """
     global poolsize
     global no_task
     global n_children
@@ -939,6 +1080,20 @@ def epoch():
 
 """Egress"""
 def update_solution(solution):
+    """
+    Sends the current best solution to the main scheduler service.
+
+    This function is called when a new best solution is found. It formats the
+    genotype into a JSON payload and POSTs it to the `/update-solution`
+    endpoint of the main service.
+
+    Args:
+        NA  
+    Returns:
+        NA
+    Raises:
+        NA
+    """
     # print("sending out an update", flush=True)
     url = f"http://{main_service}/update-solution"
     json_obj = {"fitness": solution.fitnessvalue}
@@ -959,6 +1114,22 @@ app = Flask(__name__)
 
 
 def update_batch():
+    """
+    Handles batch processing of incoming task updates.
+
+    This function runs in a separate thread and waits for task update events.
+    When an event is received, it waits for a `buffer_time` to collect a
+    batch of updates. It then processes the batch, sorting tasks into
+    `new_tasks` (for pending pods) and `old_tasks` (for succeeded pods)
+    queues, which are then consumed by the main EA loop.
+
+    Args:
+        NA  
+    Returns:
+        NA
+    Raises:
+        NA
+    """
     #thread event set by http ingress
     global tasks_arrived
     #global parameter
@@ -1014,6 +1185,18 @@ def update_batch():
 #get updates of workqueue from the main scheduler
 @app.route('/init', methods=['POST'])
 def init_request():
+    """
+    Flask route to handle the initial cluster resource information.
+
+    Receives a list of nodes at startup and populates the `resources_queue`.
+
+    Args:
+        NA  
+    Returns:
+        NA
+    Raises:
+        NA
+    """
     global resources_queue
     global http_init
     global n_init
@@ -1029,6 +1212,18 @@ def init_request():
 
 @app.route('/node-change', methods=['POST'])
 def node_change():
+    """
+    Flask route to handle dynamic changes in cluster nodes.
+
+    Receives add/delete operations for nodes and puts them on the `resources_queue`.
+    
+    Args:
+        NA  
+    Returns:
+        NA
+    Raises:
+        NA
+    """
     global resources_queue
     global node_update
     global n_node
@@ -1041,6 +1236,16 @@ def node_change():
 
 @app.route('/health', methods=['GET'])
 def health():
+    """
+    Flask route for a simple health check.
+    
+    Args:
+        NA  
+    Returns:
+        NA
+    Raises:
+        NA
+    """
     required_endpoints = {'/init', '/update', '/health'}
     registered_endpoints = {rule.rule for rule in app.url_map.iter_rules()}
 
@@ -1051,6 +1256,19 @@ def health():
 
 @app.route('/update', methods=['POST'])
 def update():
+    """
+    Flask route to receive task status updates from the main scheduler.
+
+    Appends incoming task JSON objects to a temporary queue and sets an
+    event to trigger the batch processing logic.
+
+    Args:
+        NA  
+    Returns:
+        NA
+    Raises:
+        NA
+    """
     global thread_lock_update_q
     global tasks_arrived
     global update_q
@@ -1062,6 +1280,18 @@ def update():
     return('OK', 200)
 
 def util_process():
+    """
+    Manages the utility threads for handling HTTP requests and batching.
+
+    This function starts the Flask server in one thread and the `update_batch`
+    processor in the main thread of this process.
+    Args:
+        NA  
+    Returns:
+        NA
+    Raises:
+        NA
+    """
     #IO bound
     flask_thread = threading.Thread(target=app.run, kwargs={'host': '0.0.0.0' , 'port': '80'})
     flask_thread.start()
