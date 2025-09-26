@@ -104,7 +104,7 @@ cd ../../spark
 mc --insecure rm  myminio/mybucket/${outputpath}/${name}/output/ --recursive --force
 
 ./spark-3.5.0-bin-hadoop3/bin/spark-submit \
-    --master k8s://localhost:6443 \
+    --master ${K8S_MASTER_URL:-k8s://https://localhost:6443} \
     --deploy-mode cluster \
     --class $class \
     --name ${name} \
