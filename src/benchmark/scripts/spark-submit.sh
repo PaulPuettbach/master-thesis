@@ -1,7 +1,9 @@
 #!/bin/bash
 
-exec > /dev/null 2>&1
+#exec > /dev/null 2>&1
 export PATH=$PATH:$HOME/minio-binaries/
+export KUBECONFIG="$HOME/remote-kube-config.yaml"
+export K8S_MASTER_URL="k8s://$(kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}')"
 if [ $# -ne 7 ]
 then
     echo "the 7 arguments provided that are needed are: <user>, <algorithm>, <number of executors>, <graph>, <size_of_graph>, <scheduler>, <name>" 1>&2
@@ -114,6 +116,7 @@ mc --insecure rm  myminio/mybucket/${outputpath}/${name}/output/ --recursive --f
     --conf spark.executorEnv.SPARK_USER_MANUEL="$user" \
     --conf spark.kubernetes.driverEnv.SPARK_USER_MANUEL="$user" \
     --conf spark.kubernetes.executor.deleteOnTermination=false \
+    --conf spark.kubernetes.submitInsecure=true \
     ${scheduler_conf[@]} \
     --conf spark.kubernetes.authenticate.driver.serviceAccountName=spark \
     --conf spark.kubernetes.container.image=paulpuettbach/spark_image/spark:test \

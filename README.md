@@ -28,29 +28,65 @@ use "time" the bash command for the ttc "real" user is cpu time spend in the use
 
 also the k for the sliding window i dependent on the current queue length which is the numnber of pending pods divided by the number of nodes
 
-# notes for minio
-step one
-export PATH=$PATH:$HOME/minio-binaries/
-
-step two different console
-kubectl port-forward svc/myminio-hl 9000 -n minio-tenant
-
-kubectl get pods -n spark-namespace -o jsonpath='{range .items[?(@.status.conditions[*].reason=="Unschedulable")]}{.metadata.name}{"\n"}{end}'
-
-
-step three
-mc alias set myminio http://localhost:9000 minio minio123 --insecure
-
-option after
-mc mb myminio/mybucket --insecure
-
-mc cp --recursive --insecure /mnt/d/mystuff2/master_thesis/src/benchmark/toUpload/graphs myminio/mybucket/
-
-or this
-mc cp --recursive --insecure /mnt/c/Users/paulp/Documents/my_stuff/comp_sci_master/master-thesis/src/benchmark/toUpload/graphs myminio/mybucket/
-
-mc rm --insecure myminio/mybucket/
-
 tar --use-compress-program=unzstd -xvf archive.tar.zst
 
 kubectl run waitpod --namespace spark-namespace --image=busybox --restart=Never --overrides='{"apiVersion":"v1","spec":{"schedulerName":"custom-scheduler","containers":[{"name":"waitpod","image":"busybox","command":["/bin/sh","-c","sleep 60"],"env":[{"name":"SPARK_USER_MANUEL","value":"Frank"}],"resources":{"requests":{"memory":"64Mi"}}}],"restartPolicy":"Never"}}'
+
+# Remote Cluster Access
+
+curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
+## 1. Configure Local Kubectl
+
+Set the `KUBECONFIG` environment variable to use both local and remote configurations.
+```bash
+export KUBECONFIG="$HOME/.kube/config:$HOME/remote-kube-config.yaml"
+kubectl config use-context kubernetes-admin@kubernetes --kubeconfig $HOME/remote-kube-config.yaml
+```
+
+In a separate terminal, create an SSH tunnel to the Kubernetes API server.
+```bash
+ssh -L 6444:192.168.164.2:6443 vm
+```
+
+## 2. Install and Access MinIO
+
+First, install MinIO on the remote cluster by running the installation script on the controller VM.
+```bash
+ssh vm
+helm repo add custom https://paulpuettbach.github.io/master-thesis/
+helm install minio --namespace minio --create-namespace custom/operator
+helm install minio-tenant --namespace minio-tenant --create-namespace custom/tenant
+
+helm install minio-tenant -n minio-tenant --create-namespace custom/tenant\
+  --set tenant.pools[0].servers=4 \
+  --set tenant.pools[0].name=pool-0 \
+  --set tenant.pools[0].volumesPerServer=1 \
+  --set tenant.pools[0].size=100Gi \
+  --set tenant.pools[0].storageClassName=local-path
+
+
+Next, on your local machine, open a port-forward to the MinIO service in a new terminal.
+```bash
+kubectl port-forward svc/myminio-hl 9000:9000 -n minio-tenant
+```
+
+Finally, configure your local MinIO client (`mc`) in another terminal.
+```bash
+mc alias set myminio http://localhost:9000 minio minio123 --insecure
+```
+
+
+
+ssh vm
+mkdir the correct directory
+install helm curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+helm install minio
+scp -r /mnt/sdc/puttbach cloud_controller_puttbach@192.168.164.2:/home/cloud_controller_puttbach/
+mc the whole shebang
+test the spark submit
+# Configure your MinIO endpoint
+mc alias set myminio http://<vm-ip>:9000 <ACCESS_KEY> <SECRET_KEY>
+
+
+take the kubectl apply f first

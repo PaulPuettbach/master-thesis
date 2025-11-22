@@ -40,6 +40,7 @@
 #        ProxyJump jump-node4
 #
 # 2. CONFIGURE KUBECTL
+
 # --------------------
 # This allows your local `kubectl` to talk to the remote cluster.
 #
@@ -49,19 +50,18 @@
 #      The first `sed` command replaces the remote server address with a free local port (6444).
 #      The second `sed` command adds `insecure-skip-tls-verify: true` to bypass the hostname
 #      mismatch error, which is common and acceptable when using an SSH tunnel for development.
-ssh vm 'kubectl config view --raw' \
-| sed -E 's|server: https://[0-9\.]+:[0-9]+|server: https://127.0.0.1:6444|' \
-| sed '/certificate-authority-data:/c\    insecure-skip-tls-verify: true' > ~/remote-kube-config.yaml
+ssh vm 'kubectl config view --raw' > ~/remote-kube-config.yaml
 #      in another terminal
 #      NOTE: We use local port 6444 to avoid conflicts with Docker Desktop.
-#      ssh -L 6444:192.168.164.2:6443 vm
+       ssh -L 6444:192.168.164.2:6443 vm
 #      If you see "bind: Address already in use", it means another process is using the port.
 #      Inside WSL, you can check with `sudo lsof -i :6444` and stop it with `kill <PID>`.
 #
 # 2.2. Tell kubectl to use both your local and the new remote config.
 #      This is temporary for your current terminal session. To make it permanent,
 #      add this line to your `~/.bashrc` or `~/.zshrc` file.
-#      export KUBECONFIG="$HOME/.kube/config:$HOME/remote-kube-config.yaml"
+       export KUBECONFIG="$HOME/.kube/config:$HOME/remote-kube-config.yaml"
+       kubectl config use-context kubernetes-admin@kubernetes --kubeconfig $HOME/remote-kube-config.yaml
 #
 #      Verify it's set correctly by running:
 #      echo $KUBECONFIG
@@ -69,7 +69,7 @@ ssh vm 'kubectl config view --raw' \
 # 2.3. Switch to the remote cluster's context.
 #      First, see the name of the new context:
 #      kubectl config get-contexts # Look for a name like 'kubernetes-admin@kubernetes'
-#
+#kubeadm join 192.168.164.2:6443 --token fa9fd9.uuxeqxvak21ps9ca --discovery-token-ca-cert-hash sha256:88d6c7dc25f502c85e8c3e0794d77d8d1de07525d5f11572bdf8357231dec83a
 #      Then, switch to it (replace <your-remote-context-name> with the actual context name):
 #      kubectl config use-context <your-remote-context-name>
 #
@@ -86,8 +86,6 @@ ssh vm 'kubectl config view --raw' \
 # --------------------------------
 # This section guides you through setting up MinIO, uploading your data, and running the benchmark.
 
-/mnt/sdc/puttbach
-scp -r graphs/test/ node4:/mnt/sdc/puttbach/graphs/
 # 3.1. Upload Necessary Files to MinIO
 #      Your Spark jobs will read the graph data and algorithm JAR from a MinIO S3 bucket inside the cluster.
 #      First, install and configure MinIO on the remote cluster.
@@ -114,7 +112,8 @@ scp -r graphs/test/ node4:/mnt/sdc/puttbach/graphs/
 #      f) Upload your graph files and the Graphalytics JAR to the bucket.
 #         # Adjust the source paths to where your files are located locally.
 #         mc cp --recursive --insecure /mnt/d/mystuff2/master_thesis/src/benchmark/toUpload/graphs myminio/mybucket/
-#         mc cp --insecure /path/to/your/graphalytics-platforms-graphx-0.2-SNAPSHOT-default.jar myminio/mybucket/
+#         mc cp --insecure /mnt/d/mystuff2/master_thesis/src/benchmark/toUpload/graphalytics-platforms-graphx-0.2-SNAPSHOT-default.jar myminio/mybucket/
+./spark-submit.sh paul bfs 3 test-bfs-undirected test_graphs default "paul-bfs-test-bfs-undirected"
 #
 # 4. RUN THE BENCHMARK
 # --------------------
@@ -125,3 +124,43 @@ scp -r graphs/test/ node4:/mnt/sdc/puttbach/graphs/
 # 4.2. You can now run your benchmark scripts locally. They will target the remote cluster.
 #      ./benchmark-constructor.sh 10 5 20
 #      ./generated/10-5-20/generated-10-5-20.sh custom-scheduler
+
+#stuff i did now:
+# redid the kubectl get context stuff
+#went into the controller vm which was set up and working and called sudo kubeadm token create --print-join-command
+# then into the other vm with virsh and called the command printed with the previous plus the sudo in front
+#called sudo modprobe 9p
+#called sudo modprobe 9pnet
+#called sudo modprobe  9pnet_virtio
+# then sudo mkdir -p /mnt/mnt-minio-data
+#and then sudo mount -t 9p -o trans=virtio,version=9p2000.L mnt-minio-data /mnt/mnt-minio-data
+#then 
+curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+#then 
+kubectl apply -f https://raw.githubusercontent.com/rancher/local-path-provisioner/master/deploy/local-path-storage.yaml
+kubectl edit configmap local-path-config -n local-path-storage
+{
+  "nodePathMap": [
+    {
+      "node": "DEFAULT_PATH_FOR_NON_LISTED_NODES",
+      "paths": ["/mnt/mnt-minio-data"]
+    }
+  ]
+}
+kubectl delete pod -n local-path-storage -l app=local-path-provisioner
+
+#current ssh stuff
+
+
+ssh cloud_controller_puttbach@192.168.164.2 -i /home/puttbach/.ssh/id_rsa_continuum
+ssh cloud0_puttbach@192.168.164.3 -i /home/puttbach/.ssh/id_rsa_continuum
+
+
+./bin/spark-submit \
+    --master k8s://https://192.168.164.2:6443 \
+    --deploy-mode cluster \
+    --name spark-pi \
+    --class org.apache.spark.examples.SparkPi \
+    --conf spark.executor.instances=5 \
+    --conf spark.kubernetes.container.image=paulpuettbach/spark_image/spark:test \
+    local:///path/to/examples.jar

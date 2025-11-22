@@ -12,7 +12,7 @@ case $scheduler in
     random-scheduler)
         cd ../../random
         #./load-repo.sh
-        helm install random-scheduler helm-random/ --wait
+        helm install random-scheduler custom/helm-random --wait
         cd ../spark
         ;;
 
@@ -23,7 +23,7 @@ case $scheduler in
         cd ../../scheduler/containers/util
         #./load-repo.sh
         cd ../../
-        helm install scheduler main-helm-chart/ --wait
+        helm install scheduler custom/scheduler --wait
         cd ../spark
         ;;
     *)
