@@ -3,9 +3,9 @@ entries:
   helm-random:
   - apiVersion: v2
     appVersion: 1.16.0
-    created: "2025-09-26T18:33:39.044111754+02:00"
+    created: "2025-12-02T11:21:44.189097085+01:00"
     description: A Helm chart for Kubernetes
-    digest: eed66c48bab3274e19a175ef13779aab3cebd2ecb4f0adf6b71e9b308bcc1f2b
+    digest: e470974a552caa5b9ab6d6e0a1d7a316669da35ccb09df9dc00c9500daa31cde
     name: helm-random
     type: application
     urls:
