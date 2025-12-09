@@ -7,8 +7,8 @@ replicaCount: 1
 namespace: kube-system
 
 image:
-  repository: random-scheduler
-  pullPolicy: Never
+  repository: paulpuettbach/random-scheduler
+  pullPolicy: IfNotPresent
   # Overrides the image tag whose default is the chart appVersion.
   tag: latest
 

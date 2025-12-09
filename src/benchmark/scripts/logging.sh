@@ -9,3 +9,7 @@ kubectl logs $(kubectl get pods --no-headers -o custom-columns=":metadata.name" 
 
 kubectl logs $(kubectl get pods --no-headers -o custom-columns=":metadata.name" -n kube-system | grep 'random-scheduler') -n kube-system 
 
+kubectl logs $(kubectl get pods --no-headers -o custom-columns=":metadata.name" -n spark-namespace | grep 'driver') -n spark-namespace
+
+puttbach:x:1062:1062::/home/puttbach/:/bin/bash 
+cloud_controller_puttbach:x:1001:1001::/home/cloud_controller_puttbach:/bin/bash

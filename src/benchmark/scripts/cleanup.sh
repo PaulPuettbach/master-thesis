@@ -1,4 +1,5 @@
 #!/bin/bash
+export VM_TARGET="ssh cloud_controller_puttbach@192.168.164.2 -i /home/puttbach/.ssh/id_rsa_continuum"
 if [ $# -ne 1 ]
 then
     echo "the argument provided that is needed is: <scheduler>" 1>&2
@@ -9,13 +10,13 @@ scheduler=$1
 case $scheduler in
 
     random-scheduler)
-        helm uninstall random-scheduler --wait
+        $VM_TARGET "helm uninstall random-scheduler --wait"
         ;;
     default)
         :
         ;;
     custom-scheduler)
-        helm uninstall scheduler --wait
+        $VM_TARGET "helm uninstall scheduler --wait"
         ;;
     *)
         echo "provided <scheduler> is not one of: default, custom-scheduler, random-scheduler" 1>&2

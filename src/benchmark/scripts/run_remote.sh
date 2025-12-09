@@ -60,6 +60,7 @@ ssh vm 'kubectl config view --raw' > ~/remote-kube-config.yaml
 # 2.2. Tell kubectl to use both your local and the new remote config.
 #      This is temporary for your current terminal session. To make it permanent,
 #      add this line to your `~/.bashrc` or `~/.zshrc` file.
+       export KUBECONFIG="remote-kube-config.yaml"
        export KUBECONFIG="$HOME/.kube/config:$HOME/remote-kube-config.yaml"
        kubectl config use-context kubernetes-admin@kubernetes --kubeconfig $HOME/remote-kube-config.yaml
 #
@@ -132,8 +133,8 @@ ssh vm 'kubectl config view --raw' > ~/remote-kube-config.yaml
 #called sudo modprobe 9p
 #called sudo modprobe 9pnet
 #called sudo modprobe  9pnet_virtio
-# then sudo mkdir -p /mnt/mnt-minio-data
-#and then sudo mount -t 9p -o trans=virtio,version=9p2000.L mnt-minio-data /mnt/mnt-minio-data
+# then sudo mkdir -p /mnt/data
+#and then sudo mount -t 9p -o trans=virtio,version=9p2000.L data /mnt/data
 #then 
 curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
 #then 
@@ -143,19 +144,19 @@ kubectl edit configmap local-path-config -n local-path-storage
   "nodePathMap": [
     {
       "node": "DEFAULT_PATH_FOR_NON_LISTED_NODES",
-      "paths": ["/mnt/mnt-minio-data"]
+      "paths": ["/mnt/data"]
     }
   ]
 }
 kubectl delete pod -n local-path-storage -l app=local-path-provisioner
 
 #current ssh stuff
-
+scp -r /mnt/d/graphs/* node4:/mnt/sdc/puttbach/graphs/
 
 ssh cloud_controller_puttbach@192.168.164.2 -i /home/puttbach/.ssh/id_rsa_continuum
 ssh cloud0_puttbach@192.168.164.3 -i /home/puttbach/.ssh/id_rsa_continuum
 
-
+./spark-submit.sh paul pr 3 test-pr-undirected test_graphs default paul-pr-test-pr-undirected
 ./bin/spark-submit \
     --master k8s://https://192.168.164.2:6443 \
     --deploy-mode cluster \
@@ -164,3 +165,9 @@ ssh cloud0_puttbach@192.168.164.3 -i /home/puttbach/.ssh/id_rsa_continuum
     --conf spark.executor.instances=5 \
     --conf spark.kubernetes.container.image=paulpuettbach/spark_image/spark:test \
     local:///path/to/examples.jar
+
+
+lscpu on node4 to check number of cpus
+# Enable cpu core pinning - VM cores will be pinned to physical CPU cores
+# Requires total_VM_cores < physical_cores_available (or add more external machines)
+cpu_pin = False             # Options: True, False. Default: False
